@@ -46,12 +46,23 @@ deepseek-harness 插件：统一管理多个 AI 编程服务的账号，并把�
 
 ## 安装
 
-该包尚未发布到 npm registry。提供两种安装方式。
+该包尚未发布到 npm registry，直接从本仓库安装：
+
+```
+https://github.com/huaianlin371-commits/dsh-channel-hub
+```
 
 ### 方式一：从 git 仓库安装（推荐）
 
-`add` 以 git 仓库方式安装（pnpm 内部走 `git+https:` 协议），会运行本包的 `prepare`
-脚本自动构建 `lib/`，无需手动 `pnpm build`。
+**桌面版（最省事）**：设置 → 插件 → 添加插件 → 把上面那串仓库地址粘进「包名或地址」
+输入框 → 安装 → 按提示重启 DSH。
+
+**命令行**：`add` 以 git 仓库方式安装（pnpm 内部走 `git+https:` 协议），会运行本包的
+`prepare` 脚本自动构建 `lib/`，无需手动 `pnpm build`。
+
+> ⚠️ **桌面版的 `desktop` profile 不能用命令行装**：`dsh plugin --profile desktop …`
+> 会被直接拒绝（`profile "desktop" is managed exclusively by the Electron application`）。
+> 用上面那条「设置 → 插件」的路子；命令行只适用于 web / tui 等自建 profile。
 
 > ⚠️ **本机没装 git 时 pnpm 会直接失败**（`ERR_PNPM_GIT_FETCH_FAILED`，
 > 提示 `'git' 不是内部或外部命令`）—— `github:` / `git+https:` 依赖都要 shell 出
@@ -68,7 +79,7 @@ deepseek-harness 插件：统一管理多个 AI 编程服务的账号，并把�
 **1. 先跑一次安装**（这一次必然失败，为的是让 pnpm 打印它期望的键）：
 
 ```sh
-dsh plugin --profile <name> add "https://github.com/<your-account>/dsh-channel-hub.git"
+dsh plugin --profile <name> add "https://github.com/huaianlin371-commits/dsh-channel-hub.git"
 ```
 
 **2. 按第 1 步的报错选一种写法，写进 profile 的 `pnpm-workspace.yaml`。**
@@ -85,7 +96,7 @@ allowBuilds:
 
 ```yaml
 allowBuilds:
-  dsh-channel-hub@git+https://github.com/<your-account>/dsh-channel-hub.git#<第 1 步打印的 commit>: true
+  dsh-channel-hub@git+https://github.com/huaianlin371-commits/dsh-channel-hub.git#<第 1 步打印的 commit>: true
 ```
 
 **两代通用（省事，但放宽了权限）**：
