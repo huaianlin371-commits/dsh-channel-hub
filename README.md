@@ -21,13 +21,13 @@ deepseek-harness 插件：统一管理多个 AI 编程服务的账号，并把�
 - 界面支持**中 / 英切换**（面板右上角 `EN` / `中` 按钮）
 
 > 📌 **本 README 只写「怎么用」。** 各 provider 的协议、端点、登录流程、请求头
-> 构造、实测数据与事故史等**实现细节**，统一记录在不入库的内部文档
-> `docs/implementation-notes.md` 中。需要改动实现或排查协议问题时读它。
+> 构造、实测数据与事故史等**实现细节**，记录在 `docs/agent-notes/` 下的逐 provider
+> 笔记里（如 `providers-buddy.md`、`providers-trae.md`、`providers-cline.md`）。
+> 需要改动实现或排查协议问题时读那里。
 >
-> ⚠️ **accio 的章节该文件里还没有**（`implementation-notes.md` 目前零处 accio）——
-> 读它时**不要**以为 accio 没有实现笔记。accio 的实测结论与坑点当前登记在
-> `docs/agent-notes/providers-accio.md`（含三条与参考实现相反的结论、两个真缺陷、
-> 区域选择与接线陷阱），补写 `implementation-notes.md` 的 accio 章节是**独立任务**。
+> 上游 fork 带来的 `docs/agent-notes/providers-*.md` 里有几个渠道本 fork 并未启用
+> （codearts / lobsterai / qoder / loomy / raccoon / minimax / zcode / gemini 等）——
+> 那些笔记讲的是上游实现，**不影响本 fork 的 5 个渠道**，需要时仍可参考。
 
 ---
 
@@ -40,6 +40,7 @@ deepseek-harness 插件：统一管理多个 AI 编程服务的账号，并把�
 - [本机 OpenAI 网关](#本机-openai-网关)
 - [用量徽标与 Token 用量](#用量徽标与-token-用量)
 - [配置项](#配置项)
+- [账号备份与迁移](#账号备份与迁移)
 - [开发](#开发)
 
 ---
@@ -57,63 +58,58 @@ https://github.com/huaianlin371-commits/dsh-channel-hub
 **桌面版（最省事）**：设置 → 插件 → 添加插件 → 把上面那串仓库地址粘进「包名或地址」
 输入框 → 安装 → 按提示重启 DSH。
 
-**命令行**：`add` 以 git 仓库方式安装（pnpm 内部走 `git+https:` 协议），会运行本包的
-`prepare` 脚本自动构建 `lib/`，无需手动 `pnpm build`。
+装的过程中大概率会弹一次「需要允许安装脚本」—— 那是 pnpm 在拦本包的 `prepare`
+（它要跑 `tsc` 生成 `lib/`）。点「允许这些脚本并重试」即可，**不需要手动改任何配置文件**。
 
-> ⚠️ **桌面版的 `desktop` profile 不能用命令行装**：`dsh plugin --profile desktop …`
-> 会被直接拒绝（`profile "desktop" is managed exclusively by the Electron application`）。
-> 用上面那条「设置 → 插件」的路子；命令行只适用于 web / tui 等自建 profile。
+> ⚠️ 本机没装 git 时安装会失败（`ERR_PNPM_GIT_FETCH_FAILED`，提示 `'git' 不是内部或外部命令`）
+> —— `github:` / `git+https:` 依赖都要 shell 出 `git` 来解析。
+> 先装 [Git for Windows](https://git-scm.com/download/win) 再重试。
 
-> ⚠️ **本机没装 git 时 pnpm 会直接失败**（`ERR_PNPM_GIT_FETCH_FAILED`，
-> 提示 `'git' 不是内部或外部命令`）—— `github:` / `git+https:` 依赖都要 shell 出
-> `git` 来解析。先装 [Git for Windows](https://git-scm.com/download/win) 再加。
-
-⚠️ `prepare` **不依赖任何包管理器**（它直接内联 `tsc` / `node`）：pnpm 在 clone
-目录里跑 `prepare` 时，**pnpm 10 / 11 不会把 npm 注入 PATH**（只有 pnpm ≥ 12 会）
-⇒ 若 `prepare` 里写 `npm run …`，那两代上安装会直接失败。
-
-⚠️ pnpm 10 起会拦截依赖的构建脚本，必须先在 profile 的 `pnpm-workspace.yaml`
-（路径形如 `~/.dsh/profiles/<name>/pnpm-workspace.yaml`）里放行；而**放行键的写法
-在 pnpm 10 与 pnpm 11 之间互不兼容**，写错就装不上。
-
-**1. 先跑一次安装**（这一次必然失败，为的是让 pnpm 打印它期望的键）：
+**命令行（web / tui 等自建 profile）**：
 
 ```sh
 dsh plugin --profile <name> add "https://github.com/huaianlin371-commits/dsh-channel-hub.git"
 ```
 
-**2. 按第 1 步的报错选一种写法，写进 profile 的 `pnpm-workspace.yaml`。**
+`add` 以 git 仓库方式安装（pnpm 内部走 `git+https:` 协议），会运行本包的 `prepare`
+脚本自动构建 `lib/`，无需手动 `pnpm build`。
 
-报 **`ERR_PNPM_INVALID_VERSION_UNION`** 的（**pnpm 10.x**）—— 只认**纯包名**键：
+> ⚠️ **`desktop` profile 不能用命令行装**：`dsh plugin --profile desktop …` 会被直接拒绝
+> （`profile "desktop" is managed exclusively by the Electron application`）。
+> 桌面版走上面那条 UI 路径。
 
-```yaml
-allowBuilds:
-  dsh-channel-hub: true
-```
+命令行下 pnpm 10+ 会拦构建脚本，但**没有 UI 那个按钮**，只能手改配置。它有一次失败的
+意义：让 pnpm 把期望的键打印出来。
 
-报 **`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`** 的（**pnpm 11.x**）—— git 托管包
-**不认**纯包名键，必须用第 1 步 pnpm 打印的**完整键（含 `#<commit>`）**：
+- 报 **`ERR_PNPM_INVALID_VERSION_UNION`**（pnpm 10.x）—— 只认**纯包名**键：
 
-```yaml
-allowBuilds:
-  dsh-channel-hub@git+https://github.com/huaianlin371-commits/dsh-channel-hub.git#<第 1 步打印的 commit>: true
-```
+  ```yaml
+  allowBuilds:
+    dsh-channel-hub: true
+  ```
 
-**两代通用（省事，但放宽了权限）**：
+- 报 **`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`**（pnpm 11.x）—— git 托管包**不认**纯包名键，
+  必须用报错里打印的**完整键（含 `#<commit>`）**：
 
-```yaml
-dangerouslyAllowAllBuilds: true
-```
+  ```yaml
+  allowBuilds:
+    dsh-channel-hub@git+https://github.com/huaianlin371-commits/dsh-channel-hub.git#<报错里的 commit>: true
+  ```
 
-它会放行该 profile 里**所有**依赖的构建脚本（不止本插件）。
+- 两代通用、省事但放宽权限（放行该 profile 里**所有**依赖的构建脚本）：
 
-**3. 重跑第 1 步的命令**：这次会拉取、构建并安装成功。之后每次升级重新 `add` 即可。
+  ```yaml
+  dangerouslyAllowAllBuilds: true
+  ```
 
-⚠️ **不要**写 `dsh-channel-hub@git+https://gitee.com/…`（不带 `#<commit>`）——
-这个"看起来最自然"的键在两代 pnpm 上都不工作。
+写进 profile 的 `pnpm-workspace.yaml`（路径形如 `~/.dsh/profiles/<name>/pnpm-workspace.yaml`），
+然后重跑那条 `add`。之后每次升级重新 `add` 即可 —— 用 `dangerouslyAllowAllBuilds` 的话
+不必跟着 commit 改键。
 
-⚠️ pnpm 11.x 的精确键里带 commit，因此**升级（重新 `add` 拉到新 commit）后该键
-失效**，按新报错里的键替换即可；用 `dangerouslyAllowAllBuilds` 则不必改。
+> ⚠️ `prepare` **不依赖任何包管理器**（它直接内联 `tsc` / `node`）：pnpm 在 clone 目录里
+> 跑 `prepare` 时，**pnpm 10 / 11 不会把 npm 注入 PATH**（只有 pnpm ≥ 12 会）
+> ⇒ 若 `prepare` 里写 `npm run …`，那两代上安装会直接失败。
+
 
 ### 方式二：从源码目录安装（本地开发）
 
@@ -765,5 +761,4 @@ E2E 探针**按 provider 分列**（如 `pnpm test:e2e:codearts`、`pnpm test:e2
 | `tests/unit/` | 单元测试 |
 | `tests/e2e/` | 端到端测试（默认跳过） |
 | `docs/agent-notes/` | 逐 provider 的事故史与约定（开发向） |
-| `docs/implementation-notes.md` | **全部实现细节与协议笔记（不入库）**。⚠️ **目前没有 accio 章节** —— accio 的实测笔记在 `docs/agent-notes/providers-accio.md`，补写该章节是独立任务 |
 | `cordis.patch.yml` | DSH bundle 补丁 |
