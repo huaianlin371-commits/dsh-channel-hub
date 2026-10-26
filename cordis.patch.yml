@@ -1,0 +1,12 @@
+# dsh-channel-hub 配置包补丁：在空配置根上追加插件行。
+#
+# ⚠️ 一个插件只注册一次。若本插件已在 profile 的 `dsh.profile.bundles` 里列了包名，
+#    就**不要**再在 profile 的 cordis.patch.yml 里加同样的 insert —— 两处并存会让
+#    启动验证报 `duplicate loader entry id` 并把整次安装回退。
+#
+# ⚠️ 行 id `channel-hub` 与包名无关，是别的 patch 引用本行的**稳定锚点** ——
+#    改名时只动 `name`（= 要加载的模块名，必须与 package.json 的包名一致），
+#    id 保持不变。
+- insert:
+    - id: channel-hub
+      name: 'dsh-channel-hub'
