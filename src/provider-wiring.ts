@@ -154,7 +154,7 @@ export function wireProviders(
       return outcome === undefined ? undefined : isRemoteCatalogComplete(outcome)
     },
     accountPool: pool,
-    // 图片字节桥接（2026-10-21 接通）。
+    // 图片字节桥接。
     //
     // ⚠️ 复用**同一个** `makeReadImage(ctx)` —— 不另写第二套（其余 14 家全走它）。
     //
@@ -166,7 +166,7 @@ export function wireProviders(
   })
 
   /**
-   * `analyzeImage`：让**纯文本模型**也能看图（2026-10-21，用户诉求）。
+   * `analyzeImage`：让**纯文本模型**也能看图（用户诉求）。
    *
    * ## 为什么走适配器自己的 `stream()` 而不是 `ctx.llm.stream()`
    *
@@ -278,14 +278,13 @@ export function wireProviders(
   /**
    * 在「候选为空、即将退到单凭据 ref」这一刻，先证明失败原因是不是**限流**。
    *
-   * ## 它修的是什么（真实缺陷，2026-10-03）
+   * ## 它修的是什么
    *
-   * 用户报障：`/compact` 连续四次报
-   * 「Compaction could not produce a useful summary」，会话日志里 `compaction/end`
-   * 携带的真实错误却是 `buddy: no usable credential; log in from the 大肥鱼饭碗
-   * panel first` —— 而当时 大肥鱼饭碗 里 buddy 账号**已登录、已启用**，只是它被
-   * `deepseek-v4.1-flash` 的模型级限流标记挡住（解禁时刻就在
-   * `modelRateLimits` 里）。
+   * 症状：`/compact` 连续报「Compaction could not produce a useful summary」，
+   * 而会话日志里 `compaction/end` 携带的真实错误是
+   * `buddy: no usable credential; log in from the 大肥鱼饭碗 panel first` ——
+   * 可当时面板里 buddy 账号**已登录、已启用**，只是它被目标模型的模型级限流
+   * 标记挡住（解禁时刻就在 `modelRateLimits` 里）。
    *
    * 链路：唯一的启用账号被限流 → 候选筛成空集 →
    * `select()` 只能回一个笼统的 `exhausted`（`reason` 在未锁定时被丢弃）→
@@ -293,8 +292,8 @@ export function wireProviders(
    * `BUDDY_ACCOUNT_XXX`、该 ref **根本不存在** → 适配器抛 `MISSING_CREDENTIAL`。
    *
    * 即：**凭据问题被误报成「没登录」，而真实原因是限流**。用户据此去重新
-   * 登录，方向完全错。这与本仓库已记录的同类病根一致 —— 用默认归类代替了
-   * 对业务语义的判断（qoder 的 `110` 被误归 `SERVER`、`10605` 排队被漏判）。
+   * 登录，方向完全错。这与本仓库的同类病根一致 —— 用默认归类代替了对业务语义
+   * 的判断。完整报障记录见 `docs/agent-notes/providers-buddy.md`。
    *
    * ⚠️ 这里**只改错误语义，不改可用性**：没有账号可用就是没有，压缩该失败
    * 仍然失败；修的是「用户看到的原因」。绝不静默换模型、也绝不绕过限流标记。
@@ -341,7 +340,8 @@ export function wireProviders(
    *
    * 同理，`kind === 'no-candidates'`（**一个候选都没筛出来**，余额分档压根
    * 没跑）也绝不能报「积分都已用尽」：那是在替服务端断言一件我们从没查过的
-   * 事（真实报障 2026-10-13，CodeBuddy：`明明有积分却显示不可用`）。
+   * 事（真实报障：CodeBuddy「明明有积分却显示不可用」，见
+   * `docs/agent-notes/providers-buddy.md`）。
    * ⚠️ 全被模型限流这一支已在 `credential-resolver.ts` 用
    * `throwIfAllRateLimited` 提前拦下（报出解禁时刻），故走到本分支的
    * `no-candidates` 主要是「没有任何启用中的账号」——但文案仍**并列**两种
@@ -351,7 +351,7 @@ export function wireProviders(
    * ⚠️ `kind === 'credential-only'`（**余额分档确实选出了有可用积分的号，
    * 只是那些号的凭据读不出来**）同样**绝不能**报「积分都已用尽」——
    * 那是**自相矛盾**（分档刚证明它有钱），且会把用户推向「解锁永久积分」
-   * （不可撤回地烧钱）。这是 2026-10-14 审计实测打穿的漏网路径：
+   * （不可撤回地烧钱）。这是审计实测打穿的漏网路径：
    * `pickBuddyAccount` 的 `reason` 在「候选非空但凭据全坏」时曾保持 `undefined`，
    * 被调用方的 `?? { kind: 'exhausted' }` 兜成「已用尽」。
    * 该文案必须**正向点名凭据**，并**明确劝阻解锁**。
@@ -392,13 +392,13 @@ export function wireProviders(
         )
       }
       /**
-       * ⚠️⚠️ **穷尽性守卫**（2026-10-14 审计新增）：走到这里**只允许**是
+       * ⚠️⚠️ **穷尽性守卫**：走到这里**只允许**是
        * `{ kind: 'exhausted' }` —— 它是**唯一**有事实依据可以说「积分用尽」的一档
        * （余额分档真的查过，且每个候选的可用积分都确实是 0）。
        *
        * 这里以前是**裸 `return`** 当兜底。将来给 `BuddyNoAccountReason` 再加一档时，
        * 它会**静默**落进「积分都已用尽」的文案 —— 而那句文案会把用户推向
-       * 「解锁永久积分」（**不可撤回地烧钱**）。本 PR 修的 `no-candidates` 正是
+       * 「解锁永久积分」（**不可撤回地烧钱**）。`no-candidates` 正是
        * 这个形态（它曾落进这里），故补一道**编译期**闸门，不再靠人记得改文案。
        *
        * 判据：把 `reason` 赋给**只剩 `exhausted` 那一档**的类型。若上面少接住一档
