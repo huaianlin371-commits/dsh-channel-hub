@@ -31,6 +31,7 @@ import {
   peekLedgerAccount,
   resetLedgerAccountsForTests,
 } from '../../src/token-ledger.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 /**
@@ -40,7 +41,7 @@ const here = dirname(fileURLToPath(import.meta.url))
  * 下面的 `it.each` 驱动真实 `apply()` 守。名单里被排除的两家正因**不可达**，
  * 才只能这样钉住它们「注册项还在、只是走不到」。
  */
-const indexSource = readFileSync(resolve(here, '../../src/index.ts'), 'utf8')
+const indexSource = readIndexSource()
 
 /** 记录调用的池替身（判据与真实池一致：enabled + 模型限流 + 逐个解析）。 */
 function poolOf(entries: Array<{

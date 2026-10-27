@@ -150,8 +150,46 @@ export const UI_LOCALE_VALUES: readonly UiLocale[] = ['zh', 'en']
 /** 缺键 / 脏值 / 老文档迁移时的默认语言：中文（与历史行为逐字节一致）。 */
 export const DEFAULT_UI_LOCALE: UiLocale = 'zh'
 
+/**
+ * **持久化文档形状**的版本号（架构审查 ⑦）。
+ *
+ * ## 这个数字描述什么
+ *
+ * 描述的是 `state.json` / 老契约 settings 段里**文档的形状**，**不是**插件版本，
+ * 也不是 schema 的版本。判据只有一条：**本版本代码能否无歧义地读懂这份文档**。
+ * 只有「形状真的不兼容了」才 +1，且必须同时在 {@link STATE_MIGRATIONS} 里补一步
+ * 「从旧形状升到新形状」的迁移函数 —— 只抬数字不写迁移，等于把老用户的文档
+ * 标记成「已迁移」，比不加版本号更糟。
+ *
+ * ## 为什么老文档没有本键也安全
+ *
+ * 本键是**第一次**引入的，此前所有磁盘上的文档形状都等价于 1。故缺键 ⇒ 视为 1，
+ * 不需要任何迁移动作。{@link sanitizeSchemaVersion} 负责这条兜底。
+ *
+ * ## ⚠️ 为什么本键能住 `state.json`（而 `loomyPermanentLocked` 不能）
+ *
+ * 判定标准与其它键一致：**丢失后果是否可逆**。本键丢了 ⇒ 只是回到「按当前形状
+ * 读」，读到的仍是同样的文档；不存在任何不可逆的副作用。
+ *
+ * ## ⚠️⚠️ 与 `panelEntry` / `uiLocale` 同款：schema 里**绝不能加 `.default()`**
+ *
+ * `.default()` 会在 `scope.get()` 返回的文档里**填入**默认值，于是
+ * 「老文档缺本键」这条路径（老契约后端）永远测不到，迁移判据也就形同虚设。
+ * schema 里用 `Schema.any()`：取值合法性由 {@link sanitizeSchemaVersion} 在
+ * **读写两侧**统一判（与 `minimaxXff` / `providerClosed` 同款分工）。
+ */
+export const STATE_SCHEMA_VERSION = 1
+
 /** 持久化文档结构（两种后端共用）。 */
 export interface JetHubState {
+  /**
+   * 文档形状版本（见 {@link STATE_SCHEMA_VERSION}）。
+   *
+   * 缺键 ⇒ 老文档 ⇒ 视为 {@link STATE_SCHEMA_VERSION}（本键引入前所有形状等价）。
+   * 脏值（字符串 / 小数 / 0 / 负数 / `NaN`）⇒ 同样回落当前版本 —— 不猜测用户意图，
+   * 与 {@link sanitizePanelEntry} / {@link sanitizeUiLocale} 同一取向。
+   */
+  schemaVersion?: number
   accounts: ProviderAccountEntry[]
   disabledModels: ModelDisableMap
   /**
@@ -413,6 +451,16 @@ interface SettingsScopeLike {
  * 生产代码不要直接用它做校验，走 sanitize 函数。
  */
 export const jetHubSchema = Schema.object({
+  // ⚠️ 用 `Schema.any()` 而**不是** `Schema.number()`：本后端的 `load()` 没有
+  //    try/catch，而 schemastery 的 `Schema.number()` 遇到字符串会**抛错**
+  //   （实测 3.18.4：`{ v: '2' }` → `$.v expected number but got 2`）。
+  //    用户手工把 state.json 改成 `"schemaVersion": "2"` 就会让整次载入炸掉、
+  //    账号列表退回空表 —— 一个纯元数据字段不该有这种杀伤力。
+  //    取值合法性由 `sanitizeSchemaVersion` 在读写两侧统一判（与 `minimaxXff` 同款分工）。
+  // ⚠️⚠️ 与 `panelEntry` / `uiLocale` 同款、**绝不能加 `.default()`**：
+  //    `.default()` 会把默认值填进 `scope.get()` 返回的文档，于是
+  //    「老文档缺本键」这条路径永远测不到，迁移判据形同虚设。
+  schemaVersion: Schema.any(),
   accounts: Schema.array(Schema.any()).default([]),
   disabledModels: Schema.dict(Schema.any()).default({}),
   loomyPermanentLocked: Schema.boolean().default(false),
@@ -533,6 +581,90 @@ export function sanitizeUiLocale(raw: unknown): UiLocale {
     return raw as UiLocale
   }
   return DEFAULT_UI_LOCALE
+}
+
+/**
+ * 归一化文档形状版本（{@link JetHubState.schemaVersion}）。
+ *
+ * ## 判据
+ *
+ * - **缺键 / `undefined` / `null`** ⇒ {@link STATE_SCHEMA_VERSION}
+ *   （本键引入前所有文档的形状都等价于当前版本，这是**唯一**正确的兜底方向：
+ *   回落 0 会让每次冷启动都跑一遍迁移链，而链上每一步都以为自己面对的是
+ *   远古形状）。
+ * - **正整数** ⇒ 原样返回，**包括大于当前版本的值**（见下）。
+ * - 其余（字符串 `'2'`、小数 `1.5`、`0`、负数、`NaN`、`Infinity`、对象、数组、
+ *   布尔）⇒ {@link STATE_SCHEMA_VERSION}。不猜测用户意图 —— 与
+ *   {@link sanitizePanelEntry} / {@link sanitizeUiLocale} 同一取向。
+ *
+ * ## ⚠️ 为什么**保留**大于当前版本的值，而不是抹平成当前版本
+ *
+ * 「降级」是真实场景：同一台机器上另一条工作区跑着**更新**的插件版本，它把文档
+ * 升到 3；本进程还是 1。抹平成 1 会让**读取方**再也看不见「这份文档比我新」
+ * 这个事实 —— 告警路径与 {@link migrateStateDocument} 都依赖它做判断。
+ *
+ * 故本函数只做「脏值 → 当前版本」的归一，**不做**版本收敛。
+ *
+ * ## ⚠️ 与「写侧一律盖当前版本」不矛盾（两者说的是不同的事）
+ *
+ * 版本号描述的是**这份文档当前的形状**，而写出去的一定是本进程的当前形状
+ * （`save()` 是整体替换，`FileStore.save` 的 `...state` 展开也**丢不掉**未知键
+ * —— `load()` 返回的是显式字面量，未知键在读取时就已经不在 `state` 里了）。
+ * 所以：**读**到几就报几（不收敛），**写**出去的一定是当前版本（如实描述）。
+ * 两者各自都是诚实的；把写侧也「保留」成 3 反而会让文档谎称自己是新形状。
+ */
+export function sanitizeSchemaVersion(raw: unknown): number {
+  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0) return raw
+  return STATE_SCHEMA_VERSION
+}
+
+/**
+ * 迁移链：键 = **源**版本号，值 = 把该版本的文档升到 `键 + 1` 的函数。
+ *
+ * ⚠️ 当前为空表 —— 形状还没变过。将来加形状变更时必须：
+ *
+ * 1. `STATE_SCHEMA_VERSION` +1；
+ * 2. 在**同一提交**里补上 `[旧版本]: state => 升一版` 这一步；
+ * 3. 在 `tests/unit/jet-hub-store.spec.ts` 里补一条「旧形状文档 → 载入后是新形状」
+ *    的用例（用真实的旧形状字面量，不要用当前形状改个数字）。
+ *
+ * 只抬数字不写迁移，等于把老用户的文档标记成「已迁移」—— 比不加版本号更糟。
+ */
+const STATE_MIGRATIONS: Readonly<Record<number, (state: JetHubState) => JetHubState>> = {}
+
+/**
+ * 按 {@link JetHubState.schemaVersion} 把文档升到 {@link STATE_SCHEMA_VERSION}。
+ *
+ * ## 行为
+ *
+ * - 文档版本 = 当前版本 ⇒ 原样返回（零拷贝快路径，这是**绝大多数**情况）；
+ * - 文档版本 < 当前版本 ⇒ 逐级跑 {@link STATE_MIGRATIONS}；
+ * - 文档版本 > 当前版本 ⇒ **原样返回**，不迁移、不降级。调用方
+ *   （`AccountPool.ensureLoaded`）负责告警；本函数不做 IO 也不打日志，
+ *   保持纯函数以便单测。
+ * - 链上缺一步（比如文档是 1、当前是 3，但没有 `[1]`）⇒ 原样返回，由调用方
+ *   的告警路径兜底。**绝不**因为「迁移链不完整」就丢掉文档 —— 那会让用户
+ *   的账号列表在升级时静默消失，代价远大于带着旧形状继续跑。
+ *
+ * ## ⚠️ 为什么迁移失败时不抛错
+ *
+ * 迁移是**读路径**上的动作，而读路径抛错会被 `FileStore.load` 的 catch 变成
+ * 「以空列表启动」（见那里的 warn）—— 那正是最坏的结局。故这里只做能做的，
+ * 做不了的留给上层的版本告警。
+ */
+export function migrateStateDocument(state: JetHubState): JetHubState {
+  const from = sanitizeSchemaVersion(state.schemaVersion)
+  if (from >= STATE_SCHEMA_VERSION) return state
+  let current = state
+  for (let version = from; version < STATE_SCHEMA_VERSION; version += 1) {
+    const step = STATE_MIGRATIONS[version]
+    // 链上缺一步：原样返回（见上面第三条），不丢文档。
+    if (step === undefined) return current
+    current = step(current)
+  }
+  // 迁移完盖当前版本号：否则下一次载入又会从头跑一遍链（迁移必须是幂等的，
+  // 但重复跑幂等迁移也是纯粹的浪费，且掩盖「版本号没被推进」这类缺陷）。
+  return { ...current, schemaVersion: STATE_SCHEMA_VERSION }
 }
 
 /**
@@ -1072,6 +1204,7 @@ class SettingsStore implements JetHubStore {
   load(): JetHubState | undefined {
     const value = this.scope.get() as
       | {
+        schemaVersion?: unknown
         accounts?: unknown
         disabledModels?: unknown
         aggregateRejections?: unknown
@@ -1093,6 +1226,8 @@ class SettingsStore implements JetHubStore {
       | undefined
     if (value === undefined || value === null) return undefined
     return {
+      // 老文档没这个键 ⇒ 当前版本（本键引入前所有形状等价，见 STATE_SCHEMA_VERSION）。
+      schemaVersion: sanitizeSchemaVersion(value.schemaVersion),
       accounts: sanitizeAccounts(value.accounts),
       disabledModels: sanitizeDisabledModels(value.disabledModels),
       // 老文档没这个键 → 空表（没有任何拒绝），与升级前行为一致。
@@ -1124,6 +1259,11 @@ class SettingsStore implements JetHubStore {
 
   async save(state: JetHubState): Promise<void> {
     await this.scope.replace({
+      // ⚠️ **必须带上本键**（与 `providerClosed` 同一个 `replace` 整体替换陷阱）：
+      //    漏键会让版本号在**任何**一次账号/黑名单/网关写入时被抹掉，
+      //    于是每次冷启动都以为自己在读一份「没有版本号的老文档」。
+      //    写侧一律盖**当前**版本：文档在本次写入后就是当前形状。
+      schemaVersion: STATE_SCHEMA_VERSION,
       accounts: state.accounts,
       disabledModels: state.disabledModels,
       // ⚠️⚠️ **必须带上拒绝表**（真实缺陷，对抗审计实测证伪）：
@@ -1445,6 +1585,7 @@ class FileStore implements JetHubStore {
       const parsed = JSON.parse(readFileSync(this.path, 'utf-8')) as unknown
       if (typeof parsed !== 'object' || parsed === null) return undefined
       const value = parsed as {
+        schemaVersion?: unknown
         accounts?: unknown
         disabledModels?: unknown
         aggregateRejections?: unknown
@@ -1464,6 +1605,8 @@ class FileStore implements JetHubStore {
         providerClosed?: unknown
       }
       return {
+        // 老文档没这个键 ⇒ 当前版本（与 `SettingsStore.load` 同一判据）。
+        schemaVersion: sanitizeSchemaVersion(value.schemaVersion),
         accounts: sanitizeAccounts(value.accounts),
         disabledModels: sanitizeDisabledModels(value.disabledModels),
         // 老文档没这个键 → 空表（没有任何拒绝），与升级前行为一致。
@@ -1510,6 +1653,10 @@ class FileStore implements JetHubStore {
     // `SettingsStore.save` 的逐键注释），在这里顺手全做会越过那些判据。
     this.write({
       ...state,
+      // 版本号在这里**显式**盖当前值（不靠 `...state` 展开透传）：写入方可能
+      // 来自任何调用点，而「本方法写出去的文档一定是当前形状」是本文件的契约。
+      // 与 `SettingsStore.save` 的对应行同一判据。
+      schemaVersion: STATE_SCHEMA_VERSION,
       panelEntry: sanitizePanelEntry(state.panelEntry),
       // `uiLocale` 与 `panelEntry` 同因：读侧有 `sanitizeUiLocale`，写侧也得有，
       // 否则「脏值只可能从读路径进来」这个假设就只靠约定维持。
@@ -1545,6 +1692,8 @@ class FileStore implements JetHubStore {
         .flatMap(ref => accountFromCredentialRef(ref) ?? [])
       if (accounts.length === 0) return undefined
       const state: JetHubState = {
+        // 重建出来的文档就是当前形状（凭据文件里没有任何版本信息）。
+        schemaVersion: STATE_SCHEMA_VERSION,
         accounts,
         disabledModels: {},
         // 凭据文件里没有任何拒绝信息 → 空表（与全新安装一致）。

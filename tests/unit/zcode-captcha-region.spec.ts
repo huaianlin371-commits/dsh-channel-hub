@@ -52,10 +52,11 @@ import {
 import { ModelGate } from '../../src/model-gate.js'
 import { ZCODE } from '../../src/zcode-product.js'
 import type { ZcodeCredential } from '../../src/zcode.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const authSource = readFileSync(resolve(HERE, '../../src/zcode-auth.ts'), 'utf8')
-const rpcSource = readFileSync(resolve(HERE, '../../src/jet-hub-rpc.ts'), 'utf8')
+const rpcSource = readRpcSource()
 
 /** 服务端为**非 cn 区**账号下发的配置（issue IKJNPS 的实测值）。 */
 const SGP: ZcodeCaptchaConfig = { region: 'sgp', prefix: 'pf-sgp', sceneId: '11xygtvd' }

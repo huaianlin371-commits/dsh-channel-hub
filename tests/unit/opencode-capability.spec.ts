@@ -14,12 +14,13 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const product = readFileSync(join(here, '../../src/opencode-product.ts'), 'utf8')
 const capability = readFileSync(join(here, '../../src/opencode-capability.ts'), 'utf8')
 const adapter = readFileSync(join(here, '../../src/opencode-adapter.ts'), 'utf8')
-const indexSrc = readFileSync(join(here, '../../src/index.ts'), 'utf8')
+const indexSrc = readIndexSource()
 const cacheSrc = readFileSync(join(here, '../../src/models-dev-cache.ts'), 'utf8')
 const {
   MODELS_DEV_DEADLOCK_MS,

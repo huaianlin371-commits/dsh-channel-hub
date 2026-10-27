@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { autoBadgeName, expiryCountdownText, shortProviderName } from '../../plugin-src/client/badge-model.js'
 import { resolveAutoBadgeRewrite } from '../../src/auto-badge.js'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 
 /**
  * 造一个 `AutoBadgeState` 桩（只实现被测路径需要的方法）。
@@ -36,6 +37,17 @@ function makeState({
  */
 const here = fileURLToPath(new URL('.', import.meta.url))
 const read = (rel) => readFileSync(resolve(here, '../..', rel), 'utf8')
+
+/**
+ * 读 `src/index.ts` 的**逻辑源码包**（入口 + 中部抽走的 `src/provider-wiring.ts`）。
+ *
+ * ⚠️ 架构审查 ⑨ 把 `autoAdapter` 的注册与 `modelAdapters` 表的构造搬出了 `index.ts`：
+ * `registerAutoLlm(` 目前仍在入口文件里，但 `'jet-hub-auto': pruned(...)` 与
+ * `registerJetHubRpc(ctx, pool, {…}, modelAdapters)` 都在 `provider-wiring.ts`。
+ * 直读裸 `index.ts` 会让「auto 进 modelAdapters」两条断言假红（代码在、只是换了文件）。
+ * 口径统一见 `tests/helpers/source-bundle.ts`。
+ */
+const indexBundle = () => readIndexSource()
 
 /**
  * 去掉注释后的源码。
@@ -73,7 +85,7 @@ const codeOf = (text) => text
  */
 describe('★ 旧 auto 的徽标链路：宿主侧（上游 ba10f4f 回归的恢复）', () => {
   const ADAPTER = read('src/auto-adapter.ts')
-  const RPC = read('src/jet-hub-rpc.ts')
+  const RPC = readRpcSource()
   const TYPES = read('src/types.ts')
 
   it('★ auto 适配器必须记录**实际发出**的决策（徽标的数据来源）', () => {
@@ -220,7 +232,7 @@ describe('★ 旧 auto 的徽标链路：宿主侧（上游 ba10f4f 回归的恢
   })
 
   it('★ 装配层必须把 auto 实例放进 modelAdapters 表（**不占位置参数**）', () => {
-    const INDEX = read('src/index.ts')
+    const INDEX = indexBundle()
     // 实例必须来自 registerAutoLlm 的返回值（那才是真正在用的那一个）。
     expect(INDEX).toMatch(/const autoAdapter = registerAutoLlm\(/)
     // ⚠️ 必须经 `modelAdapters` 表按 id 传入，**不能**给 registerJetHubRpc 加位置参数：
@@ -280,7 +292,7 @@ describe('★ 旧 auto 的徽标链路：宿主侧（上游 ba10f4f 回归的恢
   })
 
   it('★ 装配层必须把 auto 实例放进 modelAdapters 表（**不占位置参数**）', () => {
-    const INDEX = read('src/index.ts')
+    const INDEX = indexBundle()
     // 实例必须来自 registerAutoLlm 的返回值（那才是真正在用的那一个）。
     expect(INDEX).toMatch(/const autoAdapter = registerAutoLlm\(/)
     // ⚠️ 必须经 `modelAdapters` 表按 id 传入，**不能**给 registerJetHubRpc 加位置参数：

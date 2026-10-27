@@ -8,6 +8,7 @@ import {
 } from '../../src/buddy-compensation.js'
 import { CODEBUDDY, WORKBUDDY } from '../../src/product.js'
 import type { BuddyCredential } from '../../src/buddy.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 /**
  * ⚠️ fixture 的形状取自 **2026-10-16 的真实报文**（本机 buddy 账号实发，
@@ -277,7 +278,7 @@ describe('buddy-compensation：接线守卫（源码级）', () => {
     const { resolve } = await import('node:path')
     const { fileURLToPath } = await import('node:url')
     const here = resolve(fileURLToPath(import.meta.url), '..')
-    const source = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+    const source = readRpcSource()
     expect(source).toContain("case 'buddy.compensationStatus'")
     expect(source).toContain("case 'buddy.claimCompensation'")
     const guardCount = (source.match(/req\.provider !== CODEBUDDY\.id/g) ?? []).length
@@ -305,7 +306,7 @@ describe('buddy-compensation：接线守卫（源码级）', () => {
     const { resolve } = await import('node:path')
     const { fileURLToPath } = await import('node:url')
     const here = resolve(fileURLToPath(import.meta.url), '..')
-    const raw = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+    const raw = readRpcSource()
     // ⚠️ 先剥注释（块注释 + 行注释），再判 —— 否则注释里的同名函数会喂饱正则。
     const code = raw
       .replace(/\/\*[\s\S]*?\*\//g, '')

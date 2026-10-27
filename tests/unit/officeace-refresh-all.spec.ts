@@ -72,6 +72,7 @@ import * as officeaceAuth from '../../src/officeace-auth.js'
 import type { OfficeAceRefreshPool } from '../../src/officeace-auth.js'
 import type { ProviderAccountEntry } from '../../src/types.js'
 import { isChannelAllowed } from './_channel-whitelist.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 /**
  * ⚠️ **普查判据**：列出源码里**所有**对 `listAccountsByProvider` 的**引用点**
@@ -590,7 +591,7 @@ describe('IKLPTZ 防复发：结构与类型的判据', () => {
    * 且 index.ts 自己不再直接读 officeace 的账号列表。
    */
   it('⑦ index.ts 的 refreshAll 委托 refreshAccountList，不再自带第二份遍历', () => {
-    const source = readFileSync(join(import.meta.dirname, '../../src/index.ts'), 'utf8')
+    const source = readIndexSource()
 
     expect(
       source,

@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { descriptorOf } from '../../src/provider-registry.js'
 import { jetHubAuthsCallKeys } from '../helpers/jet-hub-auths.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const indexSource = stripComments(readFileSync(resolve(here, '../../src/index.ts'), 'utf8'))
+const indexSource = stripComments(readIndexSource())
 
 /**
  * 取某 provider 的**工厂配置块**（`createCredentialResolver(...)` 那一段）。
@@ -28,16 +30,6 @@ function factoryBlockOf(source: string, product: string): string {
     if (first?.[1] === product) return block
   }
   throw new Error(`index.ts 里找不到 ${product} 的 createCredentialResolver 配置块`)
-}
-
-/**
- * 源码级回归：新增 provider 的接线点一处都不能漏。
- * 历史缺陷正是「加了 provider 但忘了在 modelAdapters 里登记」→
- * 设置页里被关闭的模型显示成裸 id（丢倍率）。
- */
-/** 剥掉注释：接线断言不该因为「注释里提到了某个符号」而通过。 */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 }
 
 describe('Raccoon 在 index.ts 的接线', () => {

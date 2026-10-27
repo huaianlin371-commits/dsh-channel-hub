@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { JET_HUB_API_PATH, registerJetHubRpc } from '../../src/jet-hub-rpc.js'
 import { PROVIDER_REGISTRY } from '../../src/provider-registry.js'
 import type { ProviderAccountEntry } from '../../src/types.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 /**
  * ★ `credits.balances` 的**按需自愈**（Gitee issue IKKHL5 建议 C）。
@@ -601,7 +602,7 @@ describe('credits.claimAll 的按需自愈（与余额查询同一层）', () =>
  */
 describe('SELF_HEAL_REFRESHABLE_PROVIDERS 与真实分派的一致性', () => {
   const here = dirname(fileURLToPath(import.meta.url))
-  const rpcSource = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+  const rpcSource = readRpcSource()
 
   /**
    * 从源码里抽出 Set 的字面量成员与 `.id` 常量名。

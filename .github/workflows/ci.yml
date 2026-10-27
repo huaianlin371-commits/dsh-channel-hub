@@ -1,0 +1,110 @@
+name: CI
+
+# 只跑三件事：类型检查、单测、构建产物自检。
+#
+# ⚠️ 刻意**不**跑 `test:e2e:*`：那批用例要真实账号、真实浏览器与真实上游，
+# 在 CI 里既跑不通也不该跑（会把账号凭据塞进 runner）。它们的开关全部是
+# `DSH_*_E2E=1` + `*_CONFIRM=yes` 双闸门，本来就设计成本地手动执行。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一分支的新提交取消上一次未跑完的任务，省 runner 时间。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # 与 package.json 的 packageManager 无关（本仓库没写），固定大版本即可：
+          # lockfile 是 v9 格式，pnpm 10/11 都能读。
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # --ignore-scripts 是必须的：`prepare` 会跑 tsc + 构建客户端，那两步在
+      # 下面有独立的 step（跑两遍浪费时间，且失败时看不出是装依赖坏还是构建坏）。
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Typecheck (src)
+        run: pnpm run typecheck
+
+      - name: Typecheck (tests)
+        run: pnpm run typecheck:tests
+
+      - name: Unit tests
+        run: pnpm run test
+
+      # 构建三步分开跑：合并成 `build:all` 时，某一步失败只会看到一句
+      # "Command failed"，看不出是 tsc、资源复制还是客户端打包。
+      - name: Build (tsc)
+        run: pnpm run build
+
+      - name: Build (assets)
+        run: pnpm run build:assets
+
+      - name: Build (client bundle)
+        run: pnpm run build:client
+
+      # 产物自检：客户端打包器会在文件头写 `window.__ModuleLoader__.load({ id })`，
+      # id 必须等于包名 —— 不一致时插件在浏览器里静默不加载（宿主只按包名找）。
+      - name: Verify client bundle registration id
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const bundle = fs.readFileSync("lib/client/jet-hub.js", "utf8");
+            const match = bundle.match(/__ModuleLoader__\.load\(\{\s*id:\s*"([^"]+)"/);
+            if (!match) { console.error("客户端产物里找不到注册 id"); process.exit(1); }
+            if (match[1] !== pkg.name) {
+              console.error(`注册 id 与包名不一致：产物=${match[1]} 包名=${pkg.name}`);
+              process.exit(1);
+            }
+            console.log(`注册 id 校验通过：${match[1]}`);
+          '
+
+      # 发布物自检：`files` 白名单配错时，装出来的插件会缺 .wasm 或客户端产物，
+      # 而本地 `lib/` 是全的 —— 这种「本地好、装完坏」只能靠打包看。
+      - name: Verify packed tarball contents
+        run: |
+          pnpm pack --pack-destination /tmp
+          node -e '
+            const { execFileSync } = require("node:child_process");
+            const fs = require("node:fs");
+            const tgz = fs.readdirSync("/tmp").find(f => f.endsWith(".tgz"));
+            if (!tgz) { console.error("pnpm pack 没产出 tarball"); process.exit(1); }
+            const list = execFileSync("tar", ["-tzf", `/tmp/${tgz}`], { encoding: "utf8" });
+            const required = [
+              "package/lib/index.js",
+              "package/lib/index.d.ts",
+              "package/lib/client/jet-hub.js",
+              "package/lib/qoder-auth-wasm.wasm",
+              "package/cordis.patch.yml",
+            ];
+            const missing = required.filter(p => !list.split("\n").includes(p));
+            if (missing.length > 0) {
+              console.error("发布物缺少：", missing.join(", "));
+              process.exit(1);
+            }
+            const maps = list.split("\n").filter(p => p.endsWith(".map"));
+            if (maps.length > 0) {
+              console.error(`发布物里混进了 ${maps.length} 个 sourcemap（files 白名单漏了过滤）`);
+              process.exit(1);
+            }
+            console.log("发布物校验通过");
+          '

@@ -4,27 +4,18 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { descriptorOf } from '../../src/provider-registry.js'
 import { QODER, QODER_CN } from '../../src/qoder-product.js'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 import { jetHubAuthsCallKeys } from '../helpers/jet-hub-auths.js'
 import { accountEntry, refreshHarness } from '../helpers/rpc-refresh.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (p: string): string => readFileSync(resolve(here, p), 'utf8')
 
-/** 剔除注释行，避免注释里叙述缺陷的文字造成假阳性/假阴性。 */
-function codeOnly(source: string): string {
-  return source
-    .split('\n')
-    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
-    .join('\n')
-}
-
-/** 剥掉注释：接线断言不该因为「注释里提到了某个符号」而通过。 */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
-
 describe('Qoder 宿主侧接线（src/index.ts）', () => {
-  const index = stripComments(read('../../src/index.ts'))
+  // ⚠️ 读**逻辑源码包**：⑨ 把 qoder/qodercn 的接线搬进了 `src/provider-wiring.ts`，
+  //    直读裸 `index.ts` 会按「找不到 new QoderAuth(」假红。口径见 source-bundle.ts。
+  const index = stripComments(readIndexSource())
 
   it('注册了 llm-qoder settings namespace（漏了会让模型设置页崩溃）', () => {
     // 模型设置页会用 provider id 计算 deriveKeyRef(provider)，
@@ -87,7 +78,7 @@ describe('Qoder 宿主侧接线（src/index.ts）', () => {
     // 2026-10-02 那道启动门已改为「池里有账号就武装」（见 AGENTS.md
     // 「账号池的 `refreshable` 只是凭据材料的镜像」）：拿一个可能被误标的布尔
     // 决定「要不要启动修误标的机制」是循环依赖。本用例只保留真正的契约。
-    const code = codeOnly(index)
+    const code = stripComments(index)
     expect(code).not.toContain('a.refreshable && a.enabled')
     expect(code).not.toMatch(/some\(\s*a\s*=>\s*a\.enabled\s*\)/)
   })
@@ -99,14 +90,14 @@ describe('Qoder 宿主侧接线（src/index.ts）', () => {
 })
 
 describe('Qoder 大肥鱼饭碗 RPC 分支（src/jet-hub-rpc.ts）', () => {
-  const rpc = read('../../src/jet-hub-rpc.ts')
+  const rpc = readRpcSource()
 
   it('registerJetHubRpc 接受 qoder 形参', () => {
     expect(rpc).toContain('qoder: QoderAuth')
   })
 
   it('account.create 有 Qoder 同族的两步式分支', () => {
-    const code = codeOnly(rpc)
+    const code = stripComments(rpc)
     // 重构后分支按注册表判定，实例来自 member.auth（见下面的注册表 describe）。
     expect(code).toContain('isQoderFamily(provider)')
     expect(code).toContain('auth.startLogin({ refName })')
@@ -176,7 +167,7 @@ describe('Qoder 大肥鱼饭碗 RPC 分支（src/jet-hub-rpc.ts）', () => {
     //   GET  /sash/api/v1/me/campaigns
     //   POST /sash/api/v1/me/campaigns/{campaignId}/claim   （body 空）
     // 幂等判据是响应体的 `replayed`（重复领取同样 HTTP 200）。
-    const code = codeOnly(rpc)
+    const code = stripComments(rpc)
     const start = code.indexOf("case 'credits.claimAll'")
     const end = code.indexOf("case 'credits.balances'")
     expect(start).toBeGreaterThan(-1)
@@ -190,7 +181,9 @@ describe('Qoder 大肥鱼饭碗 RPC 分支（src/jet-hub-rpc.ts）', () => {
 })
 
 describe('QoderCN 宿主侧接线（src/index.ts）', () => {
-  const index = read('../../src/index.ts')
+  // 同上：走逻辑源码包，否则中国版的 `new QoderAuth(ctx, { product: QODER_CN })`
+  // 在裸 `index.ts` 里根本不存在 ⇒ 7 条全假红。
+  const index = readIndexSource()
 
   it('注册了 llm-qodercn settings namespace', () => {
     // 漏了会让模型设置页在 deriveKeyRef(provider) → provider.toUpperCase 处崩溃。
@@ -207,21 +200,21 @@ describe('QoderCN 宿主侧接线（src/index.ts）', () => {
   })
 
   it('注册了 CN 的 LLM 路由并传入 product: QODER_CN', () => {
-    const code = codeOnly(index)
+    const code = stripComments(index)
     expect(code).toContain('const qoderCnAdapter = registerQoderLlm(')
     expect(code).toContain('product: QODER_CN,')
   })
 
   it('CN 的账号池 provider 实参用 QODER_CN.id 而非字面量', () => {
     // 写死 'qoder' 会让中国版永远查不到自己的账号（workbuddy 踩过同类坑）。
-    const code = codeOnly(index)
+    const code = stripComments(index)
     expect(code).toContain('getAvailableAccount(QODER_CN.id')
     expect(code).not.toContain("getAvailableAccount('qodercn'")
   })
 
   it('CN 的默认凭据 ref 走 QODER_CN.defaultCredentialRef', () => {
     // 不能复用国际版的 QODER_ACCESS_TOKEN，否则两站账号会读写同一份凭据。
-    const code = codeOnly(index)
+    const code = stripComments(index)
     expect(code).toContain('credentialRef(QODER_CN.defaultCredentialRef)')
   })
 
@@ -229,7 +222,7 @@ describe('QoderCN 宿主侧接线（src/index.ts）', () => {
     // 与 qoder-auth 那条真实缺陷同因：刷默认单凭据 ref 会导致「刚登录却认证失败」。
     // 关键不变式是 **`qoderCn.` 前缀 + `available.entry.credentialRef`**；
     // `[^)]*` 容忍后面追加的 `pool` + `available.entry.id`（回写有效期用）。
-    const code = codeOnly(index)
+    const code = stripComments(index)
     expect(code).toMatch(/qoderCn\.refreshAccountCredential\(available\.entry\.credentialRef[^)]*\)/)
   })
 
@@ -292,15 +285,15 @@ describe('QoderCN 宿主侧接线（src/index.ts）', () => {
 
   it('续期调度不看 enabled（对 CN 同样成立）', () => {
     // 断言对象是同一份 `src/index.ts` 的启动门，理由见国际版那条用例的注释。
-    const code = codeOnly(index)
+    const code = stripComments(index)
     expect(code).not.toContain('a.refreshable && a.enabled')
     expect(code).not.toMatch(/some\(\s*a\s*=>\s*a\.enabled\s*\)/)
   })
 })
 
 describe('Qoder 同族 RPC 注册表（src/jet-hub-rpc.ts）', () => {
-  const rpc = read('../../src/jet-hub-rpc.ts')
-  const code = codeOnly(rpc)
+  const rpc = readRpcSource()
+  const code = stripComments(rpc)
 
   it('四处分支都按注册表判定，不再各写一条平行 case', () => {
     // 加同族产品只改注册表一处。历史教训：workbuddy 的「刷新」按钮一直是坏的，

@@ -68,6 +68,7 @@ import {
   readDesktopBridge,
   startCarrierContribution,
 } from '../../plugin-src/client/zcode-carrier.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const clientSource = readFileSync(
@@ -85,21 +86,6 @@ const GUI_ORIGIN = 'http://127.0.0.1:3080'
  */
 const CARRIER_URL = 'http://127.0.0.1:19321/carrier'
 const CARRIER_ORIGIN = 'http://127.0.0.1:19321'
-
-/**
- * 剥掉注释，只留**可执行代码**。
- *
- * ⚠ 为什么必须剥：本文件 F 组是源码级断言，而源码级断言有个众所周知的弱点 ——
- *   **注释里写一句话就能把它喂绿**（文件头那条「变异 ① 没红」就是活例）。
- *   「不许出现某个常量/路径」这类看守尤其容易被注释里的取证文字触发
- *   （本轮就踩了一次：文件头为了记录旧实现写了那条路径字面量）。
- *   ⇒ 断言「代码里没有它」时，一律对剥掉注释的文本断言。
- */
-function stripComments (source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1')
-}
 
 /** 载体页在 guest 里的表现（`window.__zcodeCaptcha` 的读数 + 网络层事实）。 */
 interface PageScript {

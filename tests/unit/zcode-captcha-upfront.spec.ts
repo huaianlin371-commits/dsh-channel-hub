@@ -81,6 +81,7 @@ import type { ZcodeCaptchaConfig } from '../../src/zcode-captcha.js'
 import { ModelGate } from '../../src/model-gate.js'
 import { ZCODE } from '../../src/zcode-product.js'
 import type { ZcodeCredential } from '../../src/zcode.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const CREDENTIAL: ZcodeCredential = { zcode_jwt: 'a.b.c', device_mid: 'mid-A', source: 'plugin' }
 
@@ -331,7 +332,7 @@ describe('★ 接线：ZcodeAuth.fetchCaptchaConfig 把两个开关一路带出�
  * 会让上面所有用例继续全绿，而生产行为退回改动前。
  */
 describe('★ 接线守卫：index.ts 必须把「带开关的配置」交给适配器', () => {
-  const indexSource = readFileSync(resolve(HERE, '../../src/index.ts'), 'utf8')
+  const indexSource = readIndexSource()
 
   it('★ `resolveZcodeCaptchaConfig` 把 `fetchCaptchaConfig()` 的原样结果交给 `setCaptchaConfig`', () => {
     // 剥注释后再断言：本仓库记过「把接线改成注释后源码正则仍全绿」那类假绿。

@@ -20,14 +20,11 @@ import { rankLoomyAccountsByBalance } from '../../src/loomy-balance-rank.js'
 import { LoomyBalanceSelector } from '../../src/loomy-balance-selector.js'
 import type { LoomyCredential } from '../../src/loomy.js'
 import { LOOMY } from '../../src/loomy-product.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const indexSource = stripComments(readFileSync(resolve(here, '../../src/index.ts'), 'utf8'))
-
-/** 剥掉注释（接线断言不该因为「注释里提到了某个符号」而通过）。 */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
+const indexSource = stripComments(readIndexSource())
 
 /**
  * 切出 `loomyLockedError` 那个函数的函数体。

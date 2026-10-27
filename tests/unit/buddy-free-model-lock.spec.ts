@@ -41,18 +41,15 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply } from '../../src/index.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const adapterSource = readFileSync(resolve(here, '../../src/buddy-adapter.ts'), 'utf8').replace(/\r\n/g, '\n')
-const indexSource = readFileSync(resolve(here, '../../src/index.ts'), 'utf8').replace(/\r\n/g, '\n')
+const indexSource = readIndexSource().replace(/\r\n/g, '\n')
 
-/** 剥掉注释后的源码。⚠️ 接线断言必须只看代码，不能因「注释里提到某符号」而误判。 */
-function codeOnly(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
-
-const indexCode = codeOnly(indexSource)
-const adapterCode = codeOnly(adapterSource)
+const indexCode = stripComments(indexSource)
+const adapterCode = stripComments(adapterSource)
 
 /** 复现 `isFreeModel` 的判据（与源码同口径，供行为级用例使用）。 */
 function isZeroRate(rate: string | undefined): boolean {

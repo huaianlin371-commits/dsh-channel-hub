@@ -36,6 +36,7 @@ import { join } from 'node:path'
 import { AccountPool, type ProviderAccountEntry } from '../../src/account-pool.js'
 import { apply } from '../../src/index.js'
 import { clearProviderRuntimes } from '../../src/provider-runtime.js'
+import { isChannelAllowed } from '../../src/provider-registry.js'
 
 let isolatedHome: string
 let previousHome: string | undefined
@@ -200,7 +201,15 @@ async function setup(options: {
   }
 }
 
-describe('AutoClaw 启动自愈的接线（apply() 真的会调它）', () => {
+// ⚠️ **本 fork 的白名单会把 autoclaw 关掉**（`ALLOWED_CHANNELS` 只留
+//    buddy/workbuddy/qodercn/trae/cline）。`apply()` 里的自愈调用点现在包在
+//    `if (isChannelAllowed(AUTOCLAW.id))` 之内 —— 那正是审查 ① 要求的「写盘
+//    副作用不得发生在被关渠道上」。于是整组用例在本 fork 里**必然跑不出结果**
+//    （等 5s 超时），必须跳过。
+//
+//    用 `skipIf` 而不是删除：① 上游靠这 3 条守住「接线还在」；② 哪天把
+//    autoclaw 加回白名单，这 3 条会自动恢复跑，不需要有人记得补测试。
+describe.skipIf(!isChannelAllowed('autoclaw'))('AutoClaw 启动自愈的接线（apply() 真的会调它）', () => {
   it('★ 3 条同账号（都缺 user_id）⇒ 启动后池里只剩 1 条', async () => {
     const h = await setup({
       seeds: [

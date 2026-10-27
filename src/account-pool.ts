@@ -2,7 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { BuddyCredential } from './buddy.js'
 import type { BuddyProduct } from './product.js'
-import { createJetHubStore, clearRejectionLayer, DEFAULT_PANEL_ENTRY, DEFAULT_UI_LOCALE, isValidResetAtMs, MAX_DATE_MS, mergeLegacyLoomyLock, sanitizeAccounts, sanitizeAggregateAllowed, sanitizeAggregateOrder, sanitizeAggregateOrderMode, sanitizeAggregateRejections, sanitizeDisabledModels, sanitizeMinimaxXff, sanitizePanelEntry, sanitizePermanentLocks, sanitizeProviderClosed, sanitizeUiLocale, withAllowed, withoutAllowed } from './jet-hub-store.js'
+import { createJetHubStore, clearRejectionLayer, DEFAULT_PANEL_ENTRY, DEFAULT_UI_LOCALE, isValidResetAtMs, MAX_DATE_MS, mergeLegacyLoomyLock, migrateStateDocument, sanitizeAccounts, sanitizeAggregateAllowed, sanitizeAggregateOrder, sanitizeAggregateOrderMode, sanitizeAggregateRejections, sanitizeDisabledModels, sanitizeMinimaxXff, sanitizePanelEntry, sanitizePermanentLocks, sanitizeProviderClosed, sanitizeUiLocale, STATE_SCHEMA_VERSION, withAllowed, withoutAllowed } from './jet-hub-store.js'
 import type { AggregateAllowedMap, AggregateOrderMap, AggregateOrderMode, AggregateRejectionMap, JetHubStore, JetHubState, ModelDisableMap, PanelEntry, PermanentLockMap, ProviderClosedMap, UiLocale } from './jet-hub-store.js'
 import { createPermanentLockStore } from './permanent-lock-store.js'
 import type { PermanentLockStore } from './permanent-lock-store.js'
@@ -478,7 +478,24 @@ export class AccountPool {
   private ensureLoaded(): void {
     if (this.loaded) return
     this.loaded = true
-    const state = this.store.load()
+    const loaded = this.store.load()
+    // 文档形状版本（架构审查 ⑦）。两件事，顺序不能反：
+    //
+    // 1. **降级告警**：文档版本 > 本进程版本 ⇒ 另一条工作区跑着更新的插件，
+    //    它已经把文档升到了本进程不认识的形状。此时**只告警、不拒绝、不改写**：
+    //    拒绝会让插件直接瘫；抹平版本号会让那个更新的进程再也看不到「这份文档
+    //    被旧代码写过」。本文件里的键按仓库既有分类全是「丢失后果可逆」的
+    //    （不可逆的那些早拆到独立文档了，见 `permanent-lock-store.ts` 等），
+    //    带着不认识的形状继续跑是代价最小的选择。
+    // 2. **迁移**：文档版本 < 本进程版本 ⇒ 按 `STATE_MIGRATIONS` 逐级升。
+    if (loaded !== undefined && (loaded.schemaVersion ?? STATE_SCHEMA_VERSION) > STATE_SCHEMA_VERSION) {
+      this.ctx.logger?.warn?.(
+        `[jet-hub] 状态文档的形状版本 ${String(loaded.schemaVersion)} 高于本进程支持的 `
+        + `${String(STATE_SCHEMA_VERSION)}（另一条工作区可能跑着更新的插件版本）；`
+        + '本次按兼容方式读取，升级本插件前请勿在同一台机器上并行改动账号',
+      )
+    }
+    const state = loaded === undefined ? undefined : migrateStateDocument(loaded)
     if (state !== undefined) {
       // ⚠️ 这里的 `state.accounts` **已经过去重**：两种后端（SettingsStore /
       // FileStore）的 `load()` 都经 `sanitizeAccounts`，而它按 id 去重。
@@ -591,6 +608,9 @@ export class AccountPool {
     if (this.store.kind === 'memory') return Promise.resolve()
     const next = this.storeChain.then(async () => {
       await this.store.save({
+        // 文档形状版本：本进程写出去的文档就是**当前**形状，故恒盖当前版本。
+        // ⚠️ 必须显式带上（`replace` / `write` 都是整体替换语义，见下面各键的注释）。
+        schemaVersion: STATE_SCHEMA_VERSION,
         accounts: this.cache,
         disabledModels: this.modelCache,
         // 与上面两份同源快照（见本方法注释：分两次快照会让同一份文档里的字段互相矛盾）。

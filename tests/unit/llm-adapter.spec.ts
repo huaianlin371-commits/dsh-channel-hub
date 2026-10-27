@@ -18,6 +18,7 @@ import {
 import { nextUtc8DayStartMs } from '../../src/model-queue.js'
 import { setBenefitMemoryCache } from '../../src/models.js'
 import type { CodeArtsCredential } from '../../src/types.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 const CREDENTIAL_REF = credentialRef('CODEARTS_ACCESS_TOKEN')
 
@@ -79,56 +80,6 @@ function poolWithCredentials(loggedInRefs: readonly string[]) {
     disabledModelsFor: () => new Set<string>(),
     hasLoggedInAccount: async (_provider: string) => pool.size > 0,
   }
-}
-
-/**
- * 字符级剥注释：丢掉注释内容，**保留字符串字面量与其内容**。
- *
- * 供「档位三处出口必须同源」那条**源码级**守卫使用（见其长注释）。
- *
- * 为什么不能用正则（两条都是实测踩出来的）：
- * 1. 非贪婪的块注释配对，遇到注释里孤立的块注释起始符，会与**后面的**
- *    结束符配对 ⇒ 把中间的真实代码整段吃掉 ⇒ 反向断言**恒绿**（假绿）；
- * 2. 只剥「整行是块注释」的行也不行 —— 本文件的 JSDoc 是**多行**的，
- *    只剥首尾行会剩下若干以 `*` 开头的正文行，里面的示例字面量被当真码 ⇒ **假红**。
- *
- * 状态机四态：代码 / 行注释 / 块注释 / 字符串。注释整段丢弃；字符串原样保留。
- *
- * @param source - 待处理的 TypeScript 源码文本。
- * @returns 去掉注释后的文本（行数与原文一致，注释位置留空行以外内容被删）。
- */
-function stripCommentsAndKeepStrings(source: string): string {
-  let out = ''
-  let state: 'code' | 'line' | 'block' | 'single' | 'double' | 'template' = 'code'
-  for (let i = 0; i < source.length; i++) {
-    const c = source[i]!
-    const next = source[i + 1]
-    if (state === 'code') {
-      if (c === '/' && next === '/') { state = 'line'; i++; continue }
-      if (c === '/' && next === '*') { state = 'block'; i++; continue }
-      if (c === "'") { state = 'single'; out += c; continue }
-      if (c === '"') { state = 'double'; out += c; continue }
-      if (c === '`') { state = 'template'; out += c; continue }
-      out += c
-      continue
-    }
-    if (state === 'line') {
-      if (c === '\n') { state = 'code'; out += c }
-      continue
-    }
-    if (state === 'block') {
-      if (c === '*' && next === '/') { state = 'code'; i++ }
-      // 换行保留，避免把两行粘成一行后产生假匹配。
-      else if (c === '\n') out += c
-      continue
-    }
-    // 字符串态：处理转义，遇到对应闭合引号回到 code。
-    const quote = state === 'single' ? "'" : state === 'double' ? '"' : '`'
-    if (c === '\\') { out += c + (next ?? ''); i++; continue }
-    if (c === quote && state !== 'template') { state = 'code'; out += c; continue }
-    out += c
-  }
-  return out
 }
 
 describe('CodeArtsAdapter', () => {
@@ -311,7 +262,7 @@ describe('CodeArtsAdapter', () => {
      * 其余原样保留。字符串**保留内容**（本用例要匹配的正是字符串字面量里的 `'on'`），
      * 但把引号内的转义处理好，避免 `'\''` 之类误判状态。
      */
-    const code = stripCommentsAndKeepStrings(raw)
+    const code = stripComments(raw)
 
     // ① 两条「按目录条目产出档位」的路径都必须从同一常量派生（≥2 处）。
     expect(
@@ -1219,8 +1170,6 @@ describe('CodeArtsAdapter', () => {
   it.skip('★★ 首号进 rateLimitTried（实测无牙，见上方登记）', async () => {
     expect(true).toBe(true)
   })
-
-
 
   it('translates tool_calls deltas into tool-call blocks so the harness can run them', async () => {
     const fetchImpl = vi.fn(async () => new Response(

@@ -1,0 +1,19 @@
+# ⚠️ 本文件与 package.json 的 `files` 白名单**同时生效**：
+# `files: ["lib", "locale/*.json", "cordis.patch.yml"]` 决定「哪些目录进来」，
+# 本文件决定「进来之后再去掉哪些」。
+#
+# 目的（2026-10-27 架构审查 ②）：`tsc` 会为 235 个源文件各生成一份 `.js.map`
+# 与 `.d.ts.map`，合计 3.16 MB —— 占 lib 的 23%，全是**只有开发者调试才需要**的
+# 调试元数据。而 `lib/` 正是发布物本身（用户装插件就是把这棵目录拷进
+# `node_modules/`），每多 1 MB 就是每个用户多下载 1 MB。
+#
+# ⚠️ 只排除 `.map`，**不排除 `.d.ts`**：`package.json` 的 `types` 指向
+# `lib/index.d.ts`，删了类型声明会让 TypeScript 使用方拿不到任何类型。
+*.map
+
+# ⚠️ 以下两类在 `files` 白名单下本来就进不来，写在这里是**纵深防御**：
+# 将来有人把 `files` 放宽成 `"."` 时不至于把源码与测试一起发出去。
+src/
+tests/
+plugin-src/
+docs/

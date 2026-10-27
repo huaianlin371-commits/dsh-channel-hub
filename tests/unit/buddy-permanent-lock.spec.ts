@@ -44,22 +44,13 @@ import { apply } from '../../src/index.js'
 import { allowedOnly } from './_channel-whitelist.js'
 import type { BuddyCredential } from '../../src/buddy.js'
 import type { CreditBalance } from '../../src/credits.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const indexSource = readFileSync(resolve(here, '../../src/index.ts'), 'utf8').replace(/\r\n/g, '\n')
+const indexSource = readIndexSource().replace(/\r\n/g, '\n')
 
-/**
- * 剥掉注释后的源码。
- *
- * ⚠️ 接线断言**不能**因为「注释里提到了某个符号」就通过或失败：
- * 本仓库的注释大量解释「为什么绝不能走某条兜底路径」，于是对兜底的
- * **否定**断言必须只看代码（与 `refresh-bootstrap-wiring.spec.ts` 同一约定）。
- */
-function codeOnly(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
-
-const indexCode = codeOnly(indexSource)
+const indexCode = stripComments(indexSource)
 
 /** 造一份「`days` 天后到期、余额 `remaining`」的余额。 */
 function balance(remaining: number, days: number): CreditBalance {

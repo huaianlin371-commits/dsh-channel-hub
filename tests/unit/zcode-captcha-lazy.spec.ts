@@ -46,6 +46,7 @@ import {
 } from '../../src/captcha-requirement.js'
 import { ModelGate } from '../../src/model-gate.js'
 import { ZCODE } from '../../src/zcode-product.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 /** 供「读 `src/index.ts` 源码」那条接线用例定位入口文件（同 `zcode-wiring.spec.ts`）。 */
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -373,7 +374,7 @@ describe('先探后取的可观测性', () => {
    * 只写着「缺省完全不输出」，接线掉回去时**没有任何用例会被惊动**。
    */
   it('★ index.ts 把诊断日志接到宿主 logger（缺了它线上永远看不到这三段耗时）', () => {
-    const source = readFileSync(resolve(HERE, '../../src/index.ts'), 'utf8')
+    const source = readIndexSource()
     // 要求**可选链**形态：宿主某些形态不给 logger（同文件 `makeReadImageRequest`
     // 与 `refreshAllCredentials` 两处既有防御写法就是 `ctx.logger?.warn?.(...)`）。
     // 写成 `ctx.logger.info(...)` 会在每次**成功**的推理上抛一次 TypeError ——

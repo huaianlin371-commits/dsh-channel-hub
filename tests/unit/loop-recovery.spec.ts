@@ -41,9 +41,10 @@ import {
   type LoopResumeAgent,
   type LoopResumeLog,
 } from '../../src/loop-recovery.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const indexSource = readFileSync(resolve(here, '../../src/index.ts'), 'utf8')
+const indexSource = readIndexSource()
 
 /**
  * 造一个只会记录投递的假 Agent。
@@ -611,6 +612,15 @@ describe('index.ts 的接线', () => {
   })
 
   it('不把 agents 写进静态 inject（缺席的 profile 会让插件永久 pending）', () => {
-    expect(indexSource).toContain("export const inject = ['credentials', 'commands', 'llm']")
+    // ⚠️ **本 fork 改了这条断言**（2026-10-27 架构审查 ③）：上游这里写的是
+    //    `['credentials', 'commands', 'llm']`，但 `commands` 是**死 peer** ——
+    //    `src/` 与 `plugin-src/client/` 里 `ctx.commands` 零命中（只有测试
+    //    为了满足 inject 才 `ctx.provide('commands', …)` 造了个假的）。
+    //    声明一个从不使用、且会让 profile 多一层依赖的服务没有任何收益，
+    //    反而在精简 profile 里可能把插件卡成 pending。
+    //
+    //    判据仍是「不得包含 agents」，只是把已删掉的 commands 一并锁住。
+    expect(indexSource).toContain("export const inject = ['credentials', 'llm']")
+    expect(indexSource).not.toContain("'commands'")
   })
 })

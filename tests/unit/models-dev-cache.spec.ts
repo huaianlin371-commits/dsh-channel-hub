@@ -36,15 +36,9 @@ import {
   setRemoteOpencodeReachability,
 } from '../../src/opencode-product.js'
 import { getOpencodeCapabilitiesSync, invalidateOpencodeCapabilities } from '../../src/opencode-capability.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 const SRC = join(process.cwd(), 'src')
-
-/** 剥掉注释（判据必须打在**行为**上，而不是注释里出现过的那几个字）。 */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1')
-}
 
 describe('唯一直读点（源码扫描）', () => {
   const files = readdirSync(SRC).filter((f) => f.endsWith('.ts'))

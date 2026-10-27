@@ -62,26 +62,13 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { normalizeProbeNotice, safeNoticeDetails } from '../../plugin-src/client/notice-shape.js';
+import { stripComments } from '../helpers/strip-comments.js'
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 /** 读客户端源码（源码级断言的唯一输入）。 */
 function readClientSource() {
   return readFileSync(resolve(here, '../../plugin-src/client/jet-hub.js'), 'utf8');
-}
-
-/**
- * 去掉注释后再断言。
- *
- * ⚠️ 必须去注释：本次修复的注释里**逐字引用**了错误写法
- * （`setProbeNotice('该 key 已存在…')`），不去注释会让「禁止裸字符串」
- * 的断言被自己的说明文字**假红**。本仓库已记录过这个陷阱
- * （见 `zcode-carrier-client-wiring.spec.ts` 的 `stripComments`）。
- */
-function stripComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 }
 
 describe('A. normalizeProbeNotice —— 裸字符串不得炸掉页面', () => {

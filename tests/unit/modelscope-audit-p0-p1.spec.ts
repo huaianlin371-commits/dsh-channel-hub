@@ -24,13 +24,14 @@ import { fileURLToPath } from 'node:url'
 import { classifyModelscopeError } from '../../src/modelscope-product.js'
 import { handleModelscopeRpc } from '../../src/modelscope-rpc.js'
 import { registerJetHubRpc, JET_HUB_API_PATH } from '../../src/jet-hub-rpc.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 const REPO = fileURLToPath(new URL('../..', import.meta.url))
 const read = (rel: string): string => readFileSync(REPO + rel, 'utf8')
 
 describe('★ ModelScope 登录入口（2026-10-17 审计 P0）', () => {
   it('★ 宿主的 handleMethod 必须在 switch 之前改道 modelscope. 前缀', () => {
-    const src = read('src/jet-hub-rpc.ts')
+    const src = readRpcSource()
     // ⚠️ 判据是**相对位置**而非「出现过」：改道若排在 `switch (method)` 之后，
     //    方法名会被主 switch 的 default 吃掉（这正是 P0 的形态）。
     const branch = src.indexOf("method.startsWith('modelscope.')")

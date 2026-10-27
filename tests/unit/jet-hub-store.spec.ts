@@ -13,6 +13,7 @@ import {
   clearRejectionLayer,
   createJetHubStore,
   mergeLegacyLoomyLock,
+  migrateStateDocument,
   sanitizeAccounts,
   sanitizeAggregateAllowed,
   sanitizeAggregateOrder,
@@ -23,6 +24,8 @@ import {
   sanitizePermanentLocks,
   sanitizeProviderClosed,
   sanitizeProviderOrder,
+  sanitizeSchemaVersion,
+  STATE_SCHEMA_VERSION,
   jetHubSchema as storeSchema,
   providerOfAccountRef,
   sanitizePanelEntry,
@@ -199,6 +202,8 @@ describe('老契约后端（SettingsStore）', () => {
     expect(payloads[0]!.accounts).toEqual([ACCOUNT])
     expect(payloads[0]!.disabledModels).toEqual({ buddy: { 'glm-5.2': true } })
     expect(store.load()).toEqual({
+      // 文档形状版本：写侧一律盖当前版本（架构审查 ⑦）。
+      schemaVersion: 1,
       accounts: [ACCOUNT],
       disabledModels: { buddy: { 'glm-5.2': true } },
       // save 未携带拒绝表 → 写出空表，读回同值（老文档没这个键时的默认）。
@@ -363,6 +368,8 @@ describe('文件后端（FileStore）', () => {
 
     const reader = createJetHubStore(makeCtx(undefined))
     expect(reader.load()).toEqual({
+      // 文档形状版本：跨实例读回同一个当前版本（架构审查 ⑦）。
+      schemaVersion: 1,
       accounts: [ACCOUNT],
       disabledModels: { buddy: { 'glm-5.2': true } },
       // 拒绝表缺省空表（没有任何拒绝）—— 与升级前行为一致
@@ -784,6 +791,8 @@ describe('文件后端（FileStore）', () => {
       'utf-8',
     )
     expect(createJetHubStore(makeCtx(undefined)).load()).toEqual({
+      // 文档形状版本：写侧盖当前版本，故这里读回 1（架构审查 ⑦）。
+      schemaVersion: 1,
       accounts: [],
       disabledModels: {},
       // 拒绝表缺省空表（没有任何拒绝）：读回同值。
@@ -1167,5 +1176,108 @@ describe('★ 三个新键必须在两个后端都能跨实例读回（不是只
     expect(state?.aggregateAllowed).toEqual({})
     expect(state?.aggregateOrder).toEqual({})
     expect(state?.aggregateOrderMode).toBe('expiry')
+  })
+})
+
+/**
+ * 架构审查 ⑦：持久化文档的形状版本号。
+ *
+ * 这一组锁的是**判据**，不是实现细节 —— 将来真要改形状（`STATE_SCHEMA_VERSION`
+ * 抬到 2 并补 `STATE_MIGRATIONS`），这里除了「当前版本等于 1」那条之外都该继续
+ * 原样通过。**改形状时请先确认本组仍全绿，再去改那一条。**
+ */
+describe('★ 文档形状版本号（架构审查 ⑦）', () => {
+  it('STATE_SCHEMA_VERSION 是正整数（迁移链的锚点）', () => {
+    expect(Number.isInteger(STATE_SCHEMA_VERSION)).toBe(true)
+    expect(STATE_SCHEMA_VERSION).toBeGreaterThan(0)
+  })
+
+  it('sanitizeSchemaVersion：缺键/脏值回落当前版本，正整数原样保留', () => {
+    // ① 缺键：本键引入前所有磁盘文档的形状都等价于当前版本，这是唯一正确的兜底。
+    expect(sanitizeSchemaVersion(undefined)).toBe(STATE_SCHEMA_VERSION)
+    expect(sanitizeSchemaVersion(null)).toBe(STATE_SCHEMA_VERSION)
+    // ② 合法正整数：原样保留，**包括大于当前版本的值**（降级场景，见函数注释）。
+    expect(sanitizeSchemaVersion(1)).toBe(1)
+    expect(sanitizeSchemaVersion(7)).toBe(7)
+    // ③ 脏值一律回落 —— 不猜测用户意图（与 sanitizePanelEntry/sanitizeUiLocale 同取向）。
+    //    字符串尤其重要：`Schema.number()` 会因此抛错，故 schema 里用的是 Schema.any()。
+    expect(sanitizeSchemaVersion('2')).toBe(STATE_SCHEMA_VERSION)
+    expect(sanitizeSchemaVersion(1.5)).toBe(STATE_SCHEMA_VERSION)
+    expect(sanitizeSchemaVersion(0)).toBe(STATE_SCHEMA_VERSION)
+    expect(sanitizeSchemaVersion(-3)).toBe(STATE_SCHEMA_VERSION)
+    expect(sanitizeSchemaVersion(Number.NaN)).toBe(STATE_SCHEMA_VERSION)
+    expect(sanitizeSchemaVersion(Number.POSITIVE_INFINITY)).toBe(STATE_SCHEMA_VERSION)
+    expect(sanitizeSchemaVersion({ v: 1 })).toBe(STATE_SCHEMA_VERSION)
+    expect(sanitizeSchemaVersion([1])).toBe(STATE_SCHEMA_VERSION)
+    expect(sanitizeSchemaVersion(true)).toBe(STATE_SCHEMA_VERSION)
+  })
+
+  it('schema 里用 Schema.any()：字符串版本号不会让老契约后端载入炸掉', () => {
+    // ⚠️ 这是 `Schema.number()` 与 `Schema.any()` 的分水岭（实测 schemastery 3.18.4）：
+    //    `Schema.number()` 遇到 `'2'` 会抛 `expected number but got 2`，而
+    //    `SettingsStore.load()` **没有 try/catch** ⇒ 整次载入失败、账号列表退回空表。
+    //    一个纯元数据字段不该有这种杀伤力。
+    const raw = { accounts: [], schemaVersion: '2' }
+    expect(() => storeSchema(raw)).not.toThrow()
+    expect(storeSchema(raw).schemaVersion).toBe('2')
+    // 读侧再过一遍 sanitize ⇒ 回到当前版本（脏值不猜测用户意图）。
+    expect(sanitizeSchemaVersion(storeSchema(raw).schemaVersion)).toBe(STATE_SCHEMA_VERSION)
+  })
+
+  it('schema 里没有 .default()：老文档缺本键时 schema 不会凭空填默认值', () => {
+    // ⚠️ 与 `panelEntry` / `uiLocale` 同款：`.default()` 会把默认值填进
+    //    `scope.get()` 返回的文档，于是「老文档缺本键」这条路径永远测不到。
+    expect('schemaVersion' in storeSchema({ accounts: [] })).toBe(false)
+  })
+
+  it('老文档（没有本键）载入后如实报当前版本，不是 undefined', () => {
+    mkdirSync(join(dir, 'jet-hub'), { recursive: true })
+    writeFileSync(
+      join(dir, 'jet-hub', 'state.json'),
+      // 这是**本键引入之前**的真实形状：只有两个键，其余全是后来加的。
+      JSON.stringify({ accounts: [], disabledModels: {} }),
+      'utf-8',
+    )
+    expect(createJetHubStore(makeCtx(undefined)).load()?.schemaVersion).toBe(STATE_SCHEMA_VERSION)
+  })
+
+  it('写入后磁盘文档里带版本号，且写侧一律盖当前版本（不沿用入参）', async () => {
+    const writer = createJetHubStore(makeCtx(undefined))
+    // 故意传一个「来自未来」的版本号：写出去的文档是本进程的当前形状，
+    // 谎称自己是 9 会让下一版读到假的形状信息（见 sanitizeSchemaVersion 的注释）。
+    await writer.save({ accounts: [], disabledModels: {}, schemaVersion: 9 })
+    const raw = JSON.parse(readFileSync(join(dir, 'jet-hub', 'state.json'), 'utf-8')) as Record<string, unknown>
+    expect(raw.schemaVersion).toBe(STATE_SCHEMA_VERSION)
+  })
+
+  it('老契约后端：载荷里必须带版本号，且能读回', async () => {
+    let saved: Record<string, unknown> | undefined
+    const scope = {
+      get: () => saved,
+      replace: async (section: object) => { saved = section as Record<string, unknown> },
+    }
+    const store = createJetHubStore(makeCtx({ register: () => scope, describe: () => [] }))
+    await store.save({ accounts: [], disabledModels: {} })
+    // `replace` 是整体替换语义 ⇒ 漏键会让版本号在任何一次写入时被抹掉。
+    expect(saved?.schemaVersion).toBe(STATE_SCHEMA_VERSION)
+    expect(store.load()?.schemaVersion).toBe(STATE_SCHEMA_VERSION)
+  })
+
+  it('migrateStateDocument：同版本零改动，未来版本原样返回（不降级）', () => {
+    const current = { accounts: [], disabledModels: {}, schemaVersion: STATE_SCHEMA_VERSION }
+    // 快路径：同版本直接原样返回同一个引用（绝大多数情况）。
+    expect(migrateStateDocument(current)).toBe(current)
+    // 未来版本：不迁移、不降级 —— 由调用方告警（AccountPool.ensureLoaded）。
+    const future = { accounts: [], disabledModels: {}, schemaVersion: STATE_SCHEMA_VERSION + 3 }
+    expect(migrateStateDocument(future)).toBe(future)
+    expect(migrateStateDocument(future).schemaVersion).toBe(STATE_SCHEMA_VERSION + 3)
+  })
+
+  it('migrateStateDocument：缺键文档按当前版本处理，不会被降级或丢字段', () => {
+    const legacy = { accounts: [ACCOUNT], disabledModels: {} }
+    const migrated = migrateStateDocument(legacy)
+    // 缺键 ⇒ 视为当前版本 ⇒ 走快路径，账号一个不少。
+    expect(migrated.accounts).toEqual([ACCOUNT])
+    expect(sanitizeSchemaVersion(migrated.schemaVersion)).toBe(STATE_SCHEMA_VERSION)
   })
 })

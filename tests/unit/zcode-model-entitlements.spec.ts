@@ -59,22 +59,13 @@ import {
 } from '../../src/zcode-entitlements.js'
 import type { ZcodeCredential } from '../../src/zcode.js'
 import type { ZcodeBalanceBucket } from '../../src/zcode-upstream.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const CRED = { zcode_jwt: 'jwt', device_mid: 'mid', app_version: '3.14.4' } as ZcodeCredential
 
 /** 本测试文件所在目录（用于读 `src/` 源码做结构判据）。 */
 const HERE = dirname(fileURLToPath(import.meta.url))
-
-/**
- * 剥掉块注释与行注释（避免「注释满足正则」的假绿）。
- *
- * ⚠️ 取自 `provider-runtime-wiring.spec.ts` 的同名助手（那里已验证过该写法）：
- * 源码判据**必须**先剥注释 —— 否则「把代码注释掉」等于「代码还在」，
- * 而注释里恰好写着同样的符号名时（本仓库的注释非常长）假绿概率很高。
- */
-function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
-}
 
 /** 目录 id（**大写**，DSH 用的形态）。 */
 const CATALOG = ['GLM-5.3', 'GLM-5.3-Flash'] as const
@@ -1030,7 +1021,7 @@ describe('★★★ 接线守卫：`src/index.ts` 必须为 zcode 提供**整份
      * 本仓库自己记过这条（「不要在注释里写出会被验收 grep 的字符串」），
      * 这里从**反向**踩了同一个坑。
      */
-    const source = stripComments(readFileSync(resolve(HERE, '../../src/index.ts'), 'utf8'))
+    const source = stripComments(readIndexSource())
     /**
      * ⚠️ **必须用「键形态」匹配，不能用 `toContain(name)`**：初版写
      * `toContain('catalogIdsOf')`，而把它改名成 `catalogIdsOf_DISABLED`

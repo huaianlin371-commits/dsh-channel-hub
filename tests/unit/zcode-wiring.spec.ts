@@ -37,6 +37,7 @@ import { PROVIDER_ICONS } from '../../plugin-src/client/provider-icons.js'
 import { PROVIDER_REGISTRY, descriptorOf } from '../../src/provider-registry.js'
 import { jetHubAuthsCallKeys, jetHubAuthsInterfaceKeys } from '../helpers/jet-hub-auths.js'
 import { accountEntry, refreshHarness } from '../helpers/rpc-refresh.js'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const readClient = (name: string): string =>
@@ -475,9 +476,9 @@ describe('ZCode 客户端接入（缺口 3 / 4 / 5）', () => {
 
 describe('ZCode RPC 分派（缺口 2：接线）', () => {
   const readRpc = (): string =>
-    readFileSync(resolve(HERE, '../../src/jet-hub-rpc.ts'), 'utf8')
+    readRpcSource()
   const readIndex = (): string =>
-    readFileSync(resolve(HERE, '../../src/index.ts'), 'utf8')
+    readIndexSource()
 
   /**
    * `JetHubAuths` 的**键集合** —— 取自 `src/index.ts` 的**调用点**
@@ -593,7 +594,7 @@ describe('ZCode RPC 分派（缺口 2：接线）', () => {
   })
 
   it('index.ts 把 zcode 接进 registerJetHubRpc 与 modelAdapters', () => {
-    const source = readFileSync(resolve(HERE, '../../src/index.ts'), 'utf8')
+    const source = readIndexSource()
     // ⚠️ 2026-10-08 改：原先这里断言
     //    `/registerJetHubRpc\(ctx, pool, service, .*raccoon,.*zcode,.*gemini, modelAdapters\)/`
     //    —— 那是**位置参数**时代的源码文本断言，13 个形参改成**命名对象**后
@@ -609,7 +610,7 @@ describe('ZCode RPC 分派（缺口 2：接线）', () => {
   })
 
   it('★ index.ts 的清理块会 dispose captcha 浏览器（否则留孤儿 chromium）', () => {
-    const source = readFileSync(resolve(HERE, '../../src/index.ts'), 'utf8')
+    const source = readIndexSource()
     const disposals = [...source.matchAll(/zcodeAdapter\.stop\(\)/g)]
     // 两个 ctx.effect 清理块都要有。
     expect(disposals.length).toBeGreaterThanOrEqual(2)

@@ -39,6 +39,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { ModelscopeAdapter } from '../../src/modelscope-adapter.js'
 import { MODELSCOPE, MODELSCOPE_FALLBACK_MODELS } from '../../src/modelscope-product.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const REPO = fileURLToPath(new URL('../..', import.meta.url))
 
@@ -85,7 +86,7 @@ describe('★ ModelScope 接线完整性（迁移后：黑名单走账号池）'
    * （骨架里 `deps.accountPool?.` 的 `?.` 让 undefined 变成静默 no-op）。
    */
   it('★ index.ts 的 modelscope 注册实参里必须带真 accountPool（剥注释后判定）', () => {
-    const source = readFileSync(REPO + 'src/index.ts', 'utf8')
+    const source = readIndexSource()
     const code = source
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .split('\n')

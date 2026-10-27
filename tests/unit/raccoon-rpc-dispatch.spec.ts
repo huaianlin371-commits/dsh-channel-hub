@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { createProviderCredits } from '../../src/provider-credits.js'
 import { createProviderOnboarding, onboardingOf } from '../../src/provider-onboarding.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const rpcSource = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+const rpcSource = readRpcSource()
 
 /**
  * Raccoon 的 RPC 分派（源码级回归）。

@@ -41,18 +41,15 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import { allAccountsRateLimitedForModel } from '../../src/account-pool.js'
 import type { ProviderAccountEntry } from '../../src/types.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const indexSource = readFileSync(resolve(here, '../../src/index.ts'), 'utf8').replace(/\r\n/g, '\n')
+const indexSource = readIndexSource().replace(/\r\n/g, '\n')
 const poolSource = readFileSync(resolve(here, '../../src/account-pool.ts'), 'utf8').replace(/\r\n/g, '\n')
 
-/** 剥掉注释后的源码。⚠️ 接线断言必须只看代码，不能因「注释里提到某符号」而误判。 */
-function codeOnly(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
-
-const indexCode = codeOnly(indexSource)
-const poolCode = codeOnly(poolSource)
+const indexCode = stripComments(indexSource)
+const poolCode = stripComments(poolSource)
 
 /**
  * 取**一次 `createCredentialResolver(...)` 调用**的完整源码（**括号配平**切片）。
@@ -240,7 +237,7 @@ describe('全部账号被模型限流时，报限流而非「未登录」', () =
       // 锚点用 `credential-resolver.ts`（判定所在的唯一实现）。
       const resolverSource = readFileSync(resolve(here, '../../src/credential-resolver.ts'), 'utf8')
         .replace(/\r\n/g, '\n')
-      const resolverCode = codeOnly(resolverSource)
+      const resolverCode = stripComments(resolverSource)
       const poolCall = resolverCode.indexOf('await deps.pool.getAvailableAccount(')
       expect(poolCall, '工厂里找不到池取号调用').toBeGreaterThan(-1)
       // ⚠️ **必须从池调用处往后找**：工厂里 `throwIfAllRateLimited` 有**两处**
@@ -310,7 +307,7 @@ describe('全部账号被模型限流时，报限流而非「未登录」', () =
       // 而不是某个文件的文本。
       const resolverSource = readFileSync(resolve(here, '../../src/credential-resolver.ts'), 'utf8')
         .replace(/\r\n/g, '\n')
-      expect(codeOnly(resolverSource)).toContain('await config.readCredential(config.fallback.refName)')
+      expect(stripComments(resolverSource)).toContain('await config.readCredential(config.fallback.refName)')
     })
   })
 
@@ -352,7 +349,7 @@ describe('全部账号被模型限流时，报限流而非「未登录」', () =
     it('限流判定的调用点集中在工厂里（不是每个 provider 各写一遍）', () => {
       const resolverSource = readFileSync(resolve(here, '../../src/credential-resolver.ts'), 'utf8')
         .replace(/\r\n/g, '\n')
-      const resolverCode = codeOnly(resolverSource)
+      const resolverCode = stripComments(resolverSource)
 
       /**
        * ⚠️ 判据已从「恰好 2 处」改为「**只出现在本文件**」（2026-10-13）。
@@ -378,7 +375,7 @@ describe('全部账号被模型限流时，报限流而非「未登录」', () =
           if (entry.isDirectory()) { walk(full); continue }
           if (!entry.name.endsWith('.ts')) continue
           if (resolve(full) === resolve(here, '../../src/credential-resolver.ts')) continue
-          const source = codeOnly(readFileSync(full, 'utf8').replace(/\r\n/g, '\n'))
+          const source = stripComments(readFileSync(full, 'utf8').replace(/\r\n/g, '\n'))
           if (source.includes('throwIfAllRateLimited?.(')) offenders.push(entry.name)
         }
       }

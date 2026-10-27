@@ -25,6 +25,7 @@ import {
   tokenSummaryText,
   todayDayKey,
 } from '../../plugin-src/client/token-ledger-panel.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 /** 源码契约测试用：定位仓库根下的 src/ 与 plugin-src/。 */
 const here = dirname(fileURLToPath(import.meta.url))
@@ -276,7 +277,7 @@ describe('历史视图 · RPC 响应体字段名契约', () => {
   })
 
   it('服务端 RPC 构造的响应体确实带 `history` 键', () => {
-    const rpc = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+    const rpc = readRpcSource()
     expect(rpc).toMatch(/RpcUsageTokenLedgerHistoryResponse\s*=\s*\{\s*history:/)
   })
 
@@ -296,7 +297,7 @@ describe('历史用量删除 · 范围隔离契约', () => {
   })
 
   it('服务端只接受有效日期键，并委托给历史账本删除入口', () => {
-    const rpc = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+    const rpc = readRpcSource()
     expect(rpc).toMatch(/case 'usage\.tokenLedgerDeleteDay'/)
     expect(rpc).toMatch(/isValidTokenLedgerDayKey\(req\?\.day\)/)
     expect(rpc).toMatch(/deleteTokenLedgerDay\(req\.day\)/)

@@ -20,6 +20,7 @@ import type { CreditBalance } from '../../src/credits.js'
 import { CODEBUDDY } from '../../src/product.js'
 import { LOBSTERAI } from '../../src/lobsterai-product.js'
 import { TRAE } from '../../src/trae-product.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 /** 造一份「有临期包」的余额（判据与 `sharedPackageExpiry` 的输入同形）。 */
 const balanceWith = (deductionEndTime: number, remaining = 100): CreditBalance => ({
@@ -306,9 +307,7 @@ describe('★★ 两条消费路径共用同一份缓存（回写 → 折算命�
     // ⇒ 两层判据：
     //    ① 源码级：端点里必须存在那次回写调用（锚定具体片段）；
     //    ② 行为级：`CreditsEndpointDeps.writeBalance` 被调用（下面那条用桩驱动）。
-    const raw = await import('node:fs/promises').then((fs) => fs.readFile(
-      new URL('../../src/jet-hub-rpc.ts', import.meta.url), 'utf8',
-    ))
+    const raw = await import('node:fs/promises').then((fs) => Promise.resolve(readRpcSource()))
     const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
     expect(code, '★ `collectCreditBalances` 必须回写成功读数')
       .toMatch(/deps\.writeBalance\?\.\(entry\.id, balance\)/)

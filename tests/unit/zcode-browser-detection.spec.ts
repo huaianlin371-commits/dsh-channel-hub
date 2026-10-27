@@ -38,6 +38,7 @@ import {
   scoopRootFromPath,
   BrowserDeploymentError,
 } from '../../src/chromium-session.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 /**
  * 被扫描的源码文件。
@@ -58,19 +59,6 @@ const sourcePath = join(
   'src',
   'chromium-session.ts',
 )
-
-/**
- * 剥掉注释，只留可执行代码。
- *
- * ⚠ 必须剥：本文件多处注释正是在解释「**为什么不用** `USERPROFILE`」，
- * 不剥会把这些说明当成违规（反之，实现里新加的中文注释也一样）。
- * 范式取自 `raccoon-client-independence.spec.ts`。
- */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
-}
 
 /**
  * 取某个具名函数的**函数体**（按配对大括号切，不靠正则猜边界）。

@@ -18,6 +18,7 @@ import { RaccoonAdapter } from '../../src/raccoon-adapter.js'
 import { RACCOON } from '../../src/raccoon-product.js'
 import { CODEBUDDY, type BuddyProduct } from '../../src/product.js'
 import type { BuddyCredential } from '../../src/buddy.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 /**
  * 图片像素预算的回归用例（Gitee issue !IKITT9）。
@@ -345,7 +346,9 @@ describe('五个适配器都真的走了共享投影（不再各自裸发原图�
   })
 
   it('宿主侧为这五家都桥接了 readImageRequest', () => {
-    const source = codeOnly(read('src/index.ts'))
+    // ⚠️ 走**逻辑源码包**：⑨ 把 7 处宿主桥接搬进了 `src/provider-wiring.ts`，
+    //    直读裸 `index.ts` 只剩 3 处 ⇒ 假红。口径见 `tests/helpers/source-bundle.ts`。
+    const source = codeOnly(readIndexSource())
     // buddy 与 workbuddy 各一处、raccoon / qoder / qodercn / lobsterai / cline 各一处。
     const bridges = source.match(/readImageRequest: makeReadImageRequest\(ctx\)/g) ?? []
     expect(bridges.length, `只桥接了 ${bridges.length} 处`).toBeGreaterThanOrEqual(5)
@@ -369,7 +372,9 @@ describe('五个适配器都真的走了共享投影（不再各自裸发原图�
     // ⚠️ zcode 与前四家**形状不同**：它读的是 `options.imageMaxBytes`（构造参数），
     // 而不是 product 字段。`index.ts` 原先**一处都没传** ⇒ 同样落到 2 MiB 默认值。
     // 这条按符号名断言，不用行号（本仓库的既定约定）。
-    const source = codeOnly(read('src/index.ts'))
+    // ⚠️ 同样走逻辑源码包：zcode 的注册块留在 `index.ts`（不在 provider-wiring），
+    //    但统一走 bundle 口径才不会在下次拆分时再假红。
+    const source = codeOnly(readIndexSource())
     const zcodeBlock = /registerZcodeLlm\(ctx, \{[\s\S]*?\n\}\)/.exec(source)
     expect(zcodeBlock, '未找到 zcode 的注册块（符号被改名了？）').not.toBeNull()
     expect(

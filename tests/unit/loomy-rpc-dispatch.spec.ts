@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { descriptorOf } from '../../src/provider-registry.js'
 import { PERMANENT_LOCK_PROVIDERS } from '../../src/jet-hub-rpc.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const rpcSource = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+const rpcSource = readRpcSource()
 const typesSource = readFileSync(resolve(here, '../../src/types.ts'), 'utf8')
 
 /**

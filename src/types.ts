@@ -301,6 +301,29 @@ export interface RpcCreateAccountRequest {
    * ⚠️ 缺省 = 空串 = 直连，与既有行为**逐字一致**。
    */
   geminiProxy?: string
+  /**
+   * AStudio 登录方式（**仅 astudio 需要**）：`'local'` 导入本机会话 /
+   * `'web'` 打开认证页。
+   *
+   * ⚠️ **2026-10-27 补声明**（架构审查 ⑧）：宿主早在
+   * `jet-hub-rpc.ts:5062` 就 `req as { astudioLoginMethod?: string }` 硬转着读它，
+   * 客户端也一直在传（`plugin-src/client/new-account.js:132`），只有这个接口
+   * 漏了 —— 于是「类型说有、运行时没查」的反面形态出现了：**运行时在用、
+   * 类型说没有**，`RpcCreateAccountRequest` 的读者会以为这个字段不存在。
+   *
+   * 缺省语义：`!== 'web'` 一律按 `'local'` 处理（见 `jet-hub-rpc.ts:5065`），
+   * 所以缺省是「先试本机导入，失败再回落到认证页」。
+   */
+  astudioLoginMethod?: 'local' | 'web'
+  /**
+   * AutoClaw 登录方式（**仅 autoclaw / autoclawintl 需要**）：`'local'`
+   * 一键导入本机桌面端凭据 / `'sms'` 手机验证码。
+   *
+   * ⚠️ 同上，2026-10-27 补声明。宿主读点在 `jet-hub-rpc.ts:4898`，客户端在
+   * `plugin-src/client/new-account.js:133`。缺省（`undefined`）**不等于**
+   * `'local'`：宿主只在 `=== 'local'` 时走导入，其余一律落短信分支。
+   */
+  autoclawMode?: 'local' | 'sms'
 }
 export interface RpcCreateAccountResponse {
   accountId: string
@@ -339,7 +362,19 @@ export interface RpcCreateAccountResponse {
 
 export interface RpcPollLoginRequest {
   accountId: string
-  provider: string
+  /**
+   * 渠道 id —— ⚠️ **宿主不读它，故非必填**（2026-10-27 核实）。
+   *
+   * `case 'login.poll'` 的体内只引用 `req.accountId`：它先用 accountId 从账号池
+   * 取到 `entry`，之后一律用 `entry.provider` 分派。客户端会顺手把 `provider`
+   * 一起传（`plugin-src/client/jet-hub.js:3894`），但那个值从不参与任何判断。
+   *
+   * 早先声明成必填，导致六组替身 harness（`officeace-*` / `astudio-login-credits`
+   * / `codely-login`）里只传 `{ accountId }` 的合法调用被入参校验判成
+   * `bad-request` —— 声明比实际消费多一个字段，校验层就会替这个多余的字段
+   * 制造故障。保留字段（不删）是为了不破坏既有客户端，标记可选即可。
+   */
+  provider?: string
 }
 /**
  * RPC: 轮询登录进度（`login.poll`）。
@@ -1880,8 +1915,21 @@ export interface RpcCaptchaCarrierUrlResponse {
  * 慢了一投放就过期，两种都表现为**内部载体静默不可用**。
  */
 export interface RpcCaptchaContributeRequest {
-  /** guest 里 SDK 产出的 param。空串/全空白一律不收。 */
-  param: string
+  /**
+   * guest 里 SDK 产出的 param。空串/全空白一律不收。
+   *
+   * ⚠️ 声明成可选是为了**与 case 体的宽容读法对齐**：`jet-hub-rpc.ts` 的
+   * `case 'captcha.contribute'` 写的是
+   * `typeof req.param === 'string' ? req.param : ''`，缺字段与非字符串都归一成
+   * 空串再交给 `putSuppliedParam` 自己判垃圾（回 `accepted: false`，不抛错）。
+   * 早先这里声明必填，导致 RPC 校验层把 `{}` 判成 bad-request —— 而那正是
+   * case 体**明确写过**要容忍的形状（`tests/unit/zcode-carrier-rpc.spec.ts`
+   * 有一条「缺 param 不炸」的用例盯着它）。
+   *
+   * 客户端**始终会传**（`zcode-carrier.js` 里 `state.param ?? ''`），
+   * 所以放宽只影响异常路径，不影响正常链路。
+   */
+  param?: string
   /**
    * client 侧「开始产 → 发这条 RPC」的**相对耗时**（毫秒）。
    *

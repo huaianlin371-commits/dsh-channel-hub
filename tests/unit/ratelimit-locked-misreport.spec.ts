@@ -44,6 +44,8 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { apply } from '../../src/index.js'
 import { isChannelAllowed } from './_channel-whitelist.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 class FakeCredentials {
   private store = new Map<string, string>()
@@ -130,16 +132,6 @@ afterAll(() => {
 /** 目标模型：用一个**真实模型 id** 才有意义（限流按模型记）。 */
 const MODEL = 'glm-5.3'
 const HOUR = 3_600_000
-
-/**
- * 剥掉注释的源码（源码级判据专用）。
- *
- * ⚠️ 与 `buddy-ratelimit-misreport.spec.ts` 的同名助手**同口径**：注释里出现
- * 目标字符串会让断言假命中（本仓库记过这条教训）。
- */
-function codeOnly(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
 
 /** 本文件所在目录（源码级判据要读 `src/`）。 */
 const here = dirname(fileURLToPath(import.meta.url))
@@ -539,7 +531,7 @@ describe('锁定永久积分 + 模型限流被误报成「积分已用尽」（�
      * 变异：把 `credential-only` 那一支从 `buddyLockedError` 删掉 ⇒ 本条红。
      */
     it('四家共用的 buddyLockedError 必须有 credential-only 分支，且文案劝阻解锁', () => {
-      const indexCode = codeOnly(readFileSync(resolve(here, '../../src/index.ts'), 'utf8').replace(/\r\n/g, '\n'))
+      const indexCode = stripComments(readIndexSource().replace(/\r\n/g, '\n'))
       const at = indexCode.indexOf('const buddyLockedError')
       expect(at, 'buddyLockedError 没找到').toBeGreaterThan(-1)
       // 取到下一个顶层 `const ` 声明为止（`loomyLockedError`），切成这一段的源码。

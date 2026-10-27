@@ -36,16 +36,11 @@ import { buildCreateAccountPayload, newAccountAsksChannel } from '../../plugin-s
 import { normalizeAccioRegion } from '../../src/accio-auth.js'
 import { normalizeZcodeLoginProvider } from '../../src/jet-hub-rpc.js'
 import { PROVIDER_REGISTRY } from '../../src/provider-registry.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const jetHubSource = readFileSync(resolve(HERE, '../../plugin-src/client/jet-hub.js'), 'utf8')
-
-/** 剥掉注释，只留**可执行代码**（源码级断言一律用它，别被注释喂绿）。 */
-function stripComments (source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1')
-}
 
 const jetHubCode = stripComments(jetHubSource)
 
@@ -305,7 +300,7 @@ describe('F. accio 区域选择入口（终审 I2）', () => {
   it('★ 宿主侧白名单与客户端两个选项**逐值对齐**（新增区域时三处一起改）', () => {
     // 客户端的两个 <option> 值必须都能过宿主的 `normalizeAccioRegion`，
     // 否则用户选了国际版、宿主却回落 `cn` —— 静默失效，界面看起来完全正常。
-    const rpcSource = readFileSync(resolve(HERE, '../../src/jet-hub-rpc.ts'), 'utf8')
+    const rpcSource = readRpcSource()
     expect(stripComments(rpcSource)).toContain('region: normalizeAccioRegion(req.accioRegion)')
     for (const region of ['cn', 'global']) {
       expect(normalizeAccioRegion(region)).toBe(region)
@@ -453,7 +448,7 @@ describe('E2. zcodeProvider 必须过白名单（IKJLK3 E2）', () => {
   })
 
   it('★ account.create 调用点走的是归一函数，不是 `?? \'bigmodel\'`', () => {
-    const rpcSource = readFileSync(resolve(HERE, '../../src/jet-hub-rpc.ts'), 'utf8')
+    const rpcSource = readRpcSource()
     const code = stripComments(rpcSource)
     expect(code).toContain('provider: normalizeZcodeLoginProvider(req.zcodeProvider)')
     expect(code).not.toMatch(/provider: req\.zcodeProvider \?\? 'bigmodel'/)

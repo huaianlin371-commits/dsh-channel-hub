@@ -22,7 +22,7 @@
  * ## 判据分三层（由弱到强）
  *
  * 1. **registry 契约**：两家 `permanentLock` / `usesExpiryWindow` 均 `true`。
- * 2. **`index.ts` 源码接线**（`codeOnly()` 剥注释）：两个 selector 各自
+ * 2. **`index.ts` 源码接线**（`stripComments()` 剥注释）：两个 selector 各自
  *    `product:` 正确、各自接进 `balance.selector`、`lockedError` 逐站点名、
  *    `reportPickedAccount: true` 两处齐备。
  * 3. **行为层**：把**真实上游报文形状**喂给生产解析器
@@ -58,21 +58,13 @@ import {
 } from '../../plugin-src/client/credit-expiry.js'
 import type { QoderCredential } from '../../src/qoder.js'
 import type { CreditPackage } from '../../src/credits.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const indexSource = readFileSync(resolve(here, '../../src/index.ts'), 'utf8').replace(/\r\n/g, '\n')
+const indexSource = readIndexSource().replace(/\r\n/g, '\n')
 
-/**
- * 剥掉注释后的源码。
- *
- * ⚠️ 接线断言不能因为「注释里提到了某个符号」就通过：本仓库注释大量解释
- * 「为什么不能走某条兜底」，对兜底的**否定**断言必须只看代码（与
- * `buddy-permanent-lock.spec.ts` 同一约定）。
- */
-function codeOnly(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
-const indexCode = codeOnly(indexSource)
+const indexCode = stripComments(indexSource)
 
 /**
  * ⚠️ 凭据形状取 `QoderCredential` 的两个**必填**字段。

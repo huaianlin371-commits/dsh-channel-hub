@@ -40,13 +40,14 @@ import { handleGeminiRpc } from '../../src/gemini-rpc.js'
 import { isUnreachableNetworkError } from '../../src/refresh.js'
 import { asProxyText } from '../../src/account-pool.js'
 import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // ⚠️ **全部先剥注释**：见文件头的「为什么以行为断言为主」。
 const adapterSource = stripComments(readFileSync(join(here, '../../src/gemini-adapter.ts'), 'utf8'))
 const authSource = stripComments(readFileSync(join(here, '../../src/gemini-auth.ts'), 'utf8'))
-const indexSource = stripComments(readFileSync(join(here, '../../src/index.ts'), 'utf8'))
-const rpcSource = stripComments(readFileSync(join(here, '../../src/jet-hub-rpc.ts'), 'utf8'))
+const indexSource = stripComments(readIndexSource())
+const rpcSource = stripComments(readRpcSource())
 const runtimeSource = stripComments(readFileSync(join(here, '../../src/provider-runtime.ts'), 'utf8'))
 const poolSource = stripComments(readFileSync(join(here, '../../src/account-pool.ts'), 'utf8'))
 const typesSource = stripComments(readFileSync(join(here, '../../src/types.ts'), 'utf8'))

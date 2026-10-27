@@ -37,6 +37,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { createCredentialResolver, NO_FREE_MODEL } from '../../src/credential-resolver.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SRC = resolve(HERE, '../../src')
@@ -184,7 +185,11 @@ describe('② 契约层：消费侧不再为 undefined 兜底', () => {
 })
 
 describe('③ 接线层：src/index.ts 每一处 balance 块都显式声明了 isFreeModel', () => {
-  const code = readSrc('index.ts')
+  // ⚠️ 读**逻辑源码包**（`src/index.ts` + 中部抽走的 `src/provider-wiring.ts`），
+  //    不是裸 `index.ts`：架构审查 ⑨ 把 11 处 balance 块里的 8 处搬进了
+  //    `provider-wiring.ts`，直读裸文件会让本条按「3 处」失败 —— 那是假红。
+  //    口径见 `tests/helpers/source-bundle.ts`。
+  const code = readIndexSource()
   const blocks = buddyPlanBlocks(code)
 
   it('buddy 协议的 balance 块恰好 11 处（新增渠道时本数字会变，届时一并补声明）', () => {

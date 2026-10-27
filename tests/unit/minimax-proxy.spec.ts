@@ -32,13 +32,14 @@ import {
 import { handleMinimaxIntlRpc } from '../../src/minimax-rpc.js'
 import { AccountPool } from '../../src/account-pool.js'
 import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // ⚠️ **全部先剥注释**：见文件头的「为什么以行为断言为主」。
 const adapterSource = stripComments(readFileSync(join(here, '../../src/minimax-adapter.ts'), 'utf8'))
 const authSource = stripComments(readFileSync(join(here, '../../src/minimax-auth.ts'), 'utf8'))
-const indexSource = stripComments(readFileSync(join(here, '../../src/index.ts'), 'utf8'))
-const rpcSource = stripComments(readFileSync(join(here, '../../src/jet-hub-rpc.ts'), 'utf8'))
+const indexSource = stripComments(readIndexSource())
+const rpcSource = stripComments(readRpcSource())
 const poolSource = stripComments(readFileSync(join(here, '../../src/account-pool.ts'), 'utf8'))
 const typesSource = stripComments(readFileSync(join(here, '../../src/types.ts'), 'utf8'))
 const selectorSource = stripComments(
@@ -646,7 +647,7 @@ describe('⑨ ★ 探测槽 XFF：可后填、可重置（不再是 globalThis �
  */
 describe('⑩ ★ account.create 的代理载荷必须归一化', () => {
   it('⚠️ 写池前必须过 normalizeProxy（且失败要拒绝，不能把脏值写进去）', () => {
-    const rpc = stripComments(readFileSync(join(here, '../../src/jet-hub-rpc.ts'), 'utf8'))
+    const rpc = stripComments(readRpcSource())
     // 锚在**具体表达式**上：`normalizeProxy(intlProxyInput)`。
     expect(rpc, '载荷入口没过 normalizeProxy ⇒ 非法串会写进池且永不自愈')
       .toContain('normalizeProxy(intlProxyInput)')

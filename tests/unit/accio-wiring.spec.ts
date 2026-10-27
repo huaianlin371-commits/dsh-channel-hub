@@ -25,15 +25,18 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { PROVIDER_REGISTRY, descriptorOf, creditCapabilitiesOf } from '../../src/provider-registry.js'
 import { JET_HUB_API_PATH, registerJetHubRpc } from '../../src/jet-hub-rpc.js'
 import { jetHubAuthsCallKeys } from '../helpers/jet-hub-auths.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
-const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src')
-const indexSrc = readFileSync(join(SRC_DIR, 'index.ts'), 'utf8')
+/**
+ * ⚠️ 读 `index` 的**逻辑源码包**（入口 + 中部抽走的 `src/provider-wiring.ts`），
+ * 不读裸 `index.ts`：⑨ 把 accio 的注册与 `auths` 键搬进了 `provider-wiring.ts`，
+ * 直读裸文件会随拆分「悄悄少看半个模块」（当前恰好还全在入口文件里，
+ * 但下一次拆分就会假红或假绿）。口径见 `tests/helpers/source-bundle.ts`。
+ */
+const indexSrc = readIndexSource()
 
 describe('★ registry 声明', () => {
   it('accio 在 PROVIDER_REGISTRY 里', () => {

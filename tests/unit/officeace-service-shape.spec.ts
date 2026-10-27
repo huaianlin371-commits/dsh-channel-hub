@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import * as officeaceAuth from '../../src/officeace-auth.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 describe('officeace auth 服务包装的形状约束', () => {
   it('① 复制出的普通对象含**全部**导出，新增导出不再漏', () => {
@@ -49,10 +50,7 @@ describe('officeace auth 服务包装的形状约束', () => {
    * 不必再手工登记。这样「漏同步」这一类缺陷**不可能**再发生。
    */
   it('④ index.ts 的服务包装是「复制模块导出」形态，不是手写清单（漏同步 ⇒ 登录失败）', () => {
-    const source = readFileSync(
-      new URL('../../src/index.ts', import.meta.url),
-      'utf8',
-    )
+    const source = readIndexSource()
     // ⚠️ 判据是**形态**，不是「某个方法名在不在」—— 后者正是会漂移的那种写法。
     expect(
       source,

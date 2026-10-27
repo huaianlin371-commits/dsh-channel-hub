@@ -47,9 +47,10 @@ import {
   ZCODE_CAPTCHA_FALLBACK,
 } from '../../src/zcode-captcha.js'
 import { buildCarrierPageHtml } from '../../src/zcode-carrier-page.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const rpcSource = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+const rpcSource = readRpcSource()
 
 /** 过 `validateCaptchaParam` 的 param（收货口有质量闸，见文件头）。 */
 function goodParam (tag: string): string {

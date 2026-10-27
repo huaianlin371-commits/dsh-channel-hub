@@ -4,6 +4,7 @@ import { deriveProjectId } from '../../src/opencode.js'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 /**
  * ⚠️ **代理路径的 fetch 来自外部 undici**（`proxyFetch` 与 dispatcher 同源，
@@ -67,10 +68,7 @@ function harness() {
 }
 
 describe('分派归属（真实事故 2026-10-02）', () => {
-  const hubRpc = readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), '../../src/jet-hub-rpc.ts'),
-    'utf8',
-  )
+  const hubRpc = readRpcSource()
 
   it('⚠️ 不认识的方法返回 undefined（让主 switch 继续匹配，而非自己回错误信封）', async () => {
     const { call } = harness()

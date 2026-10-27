@@ -37,6 +37,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { PROVIDER_REGISTRY } from '../../src/provider-registry.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 const REPO = fileURLToPath(new URL('../..', import.meta.url))
 
@@ -49,15 +50,6 @@ const VIRTUAL_PROVIDERS = new Map<string, string>([
   ['auto', '只有一个合成模型 auto，目标由选型决定，没有自己的上游目录'],
   ['jet-hub-auto', '与 auto 同一实例（AUTO_PROVIDER 常量）'],
 ])
-
-/** 剥掉注释（判据用；防「注释里写了一句就算接线了」的诱饵）。 */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .filter((line) => !/^\s*\/\//.test(line))
-    .join('\n')
-}
 
 /** 全部适配器源文件（键 = 文件名）。 */
 function adapterSources(): Map<string, string> {

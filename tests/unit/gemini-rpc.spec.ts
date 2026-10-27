@@ -44,6 +44,8 @@ import { GEMINI, GEMINI_ENDPOINT_SANDBOX, GEMINI_QUOTA_PATH } from '../../src/ge
 import { descriptorOf } from '../../src/provider-registry.js'
 import { jetHubAuthsCallKeys } from '../helpers/jet-hub-auths.js'
 import { clearGeminiCreditCache } from '../../src/gemini-credits.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 
 /** 内存凭据存储（与其它 provider 的 spec 同款）。 */
 class FakeCredentials {
@@ -254,7 +256,6 @@ async function waitForGone(
  * IKLZ2 对抗审计实测：不剥注释时，「把接线删掉、只留注释里的字面量」这类
  * 变异能让判据全绿）。
  */
-import { stripComments } from '../helpers/strip-comments.js'
 
 describe('Gemini 大肥鱼饭碗 登录接入', () => {
   it('★ account.create 立刻返回真实 Google 授权 URL，并登记一个不可续期的占位账号', async () => {
@@ -525,11 +526,11 @@ describe('Gemini credits.balances', () => {
 
 describe('Gemini 接线点（源码断言）', () => {
   const here = dirname(fileURLToPath(import.meta.url))
-  const indexSource = stripComments(readFileSync(resolve(here, '../../src/index.ts'), 'utf8'))
-  const rpcSource = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+  const indexSource = stripComments(readIndexSource())
+  const rpcSource = readRpcSource()
   // ⚠️ Task 8 起：探测适配器的构造在 `index.ts` 的 `probeById`（account-probe 已改为
   //    查能力注册表），故这里读的是 `index.ts`。
-  const probeSource = readFileSync(resolve(here, '../../src/index.ts'), 'utf8')
+  const probeSource = readIndexSource()
 
   it('⚠️ index.ts 接线点齐全，且签名缓存在卸载时落盘', () => {
     expect(indexSource).toContain("from './gemini-auth.js'")

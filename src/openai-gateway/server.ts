@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -66,6 +66,16 @@ export interface OpenAiGatewayOptions {
    * 网卡）——语义与安全边界见 `config.ts` 的 `ResolveGatewayConfigOptions`。
    */
   allowLan?: boolean
+  /**
+   * 同时在飞的请求上限；缺省 {@link DEFAULT_MAX_INFLIGHT}。
+   *
+   * 存在的理由（2026-10-27 架构审查 ④）：网关本身**不做鉴权外的任何节流**，
+   * 而每个请求都会在账号池里占一个账号、向上游开一条流。局域网开关打开后，
+   * 同一网段任何能拿到 Key 的进程都能一次性打满账号池，让真人的会话排队。
+   * 超限直接回 429（而不是排队）——客户端看到 429 会自己退避，排队则会让
+   * 所有人一起变慢且看不出原因。
+   */
+  maxInflight?: number
 }
 
 export interface OpenAiGateway {
@@ -97,6 +107,16 @@ export interface OpenAiGateway {
  */
 export const BODY_LIMIT = 300 * 1024 * 1024
 
+/**
+ * 同时在飞的请求上限（缺省值，见 {@link OpenAiGatewayOptions.maxInflight}）。
+ *
+ * 为什么是 8：本插件保留的 5 个渠道里，单渠道账号数最多 4 个（`buddy`/`trae`），
+ * 加上「一个账号同一模型只试一次」的换号逻辑，8 条并发已经能把所有账号同时
+ * 用满而不至于把池子打空。取值更小的风险是真人多开几个窗口就撞 429；更大则
+ * 失去意义（账号池本身就会排队）。
+ */
+export const DEFAULT_MAX_INFLIGHT = 8
+
 const defaultLogger: GatewayLogger = {
   info: (message) => console.info(message),
   warn: (message) => console.warn(message),
@@ -109,7 +129,10 @@ function jsonResponse(response: ServerResponse, status: number, value: unknown):
   response.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
-    'access-control-allow-origin': '*',
+    // ⚠️ 刻意**不**发 `access-control-allow-origin`（2026-10-27 架构审查 ④）。
+    // 浏览器在没有 CORS 头时读不到响应体，而本网关的真实消费者（命令行、
+    // IDE、桌面客户端）根本不走 CORS 检查。放开 `*` 的唯一效果是让「本机
+    // 某个网页」也能读到模型输出 —— 纯风险，零收益。
   })
   response.end(body)
 }
@@ -162,9 +185,30 @@ function readJson(request: IncomingMessage, signal: AbortSignal, limit: number):
   })
 }
 
+/**
+ * 校验 `Authorization: Bearer <key>`。
+ *
+ * ⚠️ **必须用 `timingSafeEqual`，不能用 `===`**（2026-10-27 架构审查 ④）。
+ *
+ * 字符串 `===` 是逐字节短路比较：第 1 个字节就不同时立刻返回，越晚才出现差异
+ * 的输入耗时越长。攻击者据此可以一位一位地把密钥「猜」出来（时序侧信道），
+ * 这是 CWE-208 的教科书案例。网关默认只绑回环，但 `DSH_OPENAI_GATEWAY_HOST`
+ * 允许改成局域网地址 —— 一旦用户开了 LAN，这条就是真实可利用的漏洞。
+ *
+ * 两个坑：
+ *   1. `timingSafeEqual` 要求**两侧长度相同**，长度不等会直接抛
+ *      `RangeError: Input buffers must have the same byte length`。所以先比
+ *      长度：长度不同必然不匹配，提前 return 不泄漏内容（长度本身不是秘密，
+ *      密钥长度由本插件固定生成）。
+ *   2. 比较前先转 `Buffer`：`timingSafeEqual` 只接受 Buffer/TypedArray。
+ */
 function authorized(request: IncomingMessage, key: string): boolean {
   const value = request.headers.authorization
-  return typeof value === 'string' && value === `Bearer ${key}`
+  if (typeof value !== 'string') return false
+  const expected = Buffer.from(`Bearer ${key}`, 'utf8')
+  const actual = Buffer.from(value, 'utf8')
+  if (actual.length !== expected.length) return false
+  return timingSafeEqual(actual, expected)
 }
 
 function getHome(options: OpenAiGatewayOptions): string {
@@ -179,6 +223,7 @@ export function createOpenAiGateway(options: OpenAiGatewayOptions): OpenAiGatewa
   const apiKey = loadOrCreateApiKey(getHome(options), env)
   const key = apiKey.value
   const bodyLimit = options.maxBodyBytes ?? BODY_LIMIT
+  const maxInflight = options.maxInflight ?? DEFAULT_MAX_INFLIGHT
   const logger = options.logger ?? defaultLogger
   let server: Server | undefined
   let boundPort = config.port
@@ -339,7 +384,7 @@ export function createOpenAiGateway(options: OpenAiGatewayOptions): OpenAiGatewa
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-transform',
       connection: 'keep-alive',
-      'access-control-allow-origin': '*',
+      // 同 jsonResponse：不发 `access-control-allow-origin`（见那里的注释）。
     })
   }
 
@@ -458,16 +503,34 @@ export function createOpenAiGateway(options: OpenAiGatewayOptions): OpenAiGatewa
 
   const requestHandler = (request: IncomingMessage, response: ServerResponse): void => {
     if (request.method === 'OPTIONS') {
-      response.writeHead(204, {
-        'access-control-allow-origin': '*',
-        'access-control-allow-headers': 'Authorization, Content-Type',
-        'access-control-allow-methods': 'GET, POST, OPTIONS',
-      })
+      // ⚠️ 预检**不**回 `access-control-allow-origin: *`（2026-10-27 架构审查 ④）。
+      //
+      // 本网关的消费者是命令行/IDE/桌面客户端，没有一个需要浏览器跨域；而
+      // `*` + `Authorization` 的组合意味着「用户在这台机器上打开的任何网页，
+      // 都能带着自己读到的 Key 直接调网关」。那正是 CSRF/DNS-rebinding 类攻击
+      // 的入口，且用户完全看不到（浏览器会静默完成预检）。
+      //
+      // 只回 204 与允许的方法：真正的客户端不预检，预检只可能来自浏览器。
+      response.writeHead(204, { allow: 'GET, POST, OPTIONS' })
       response.end()
       return
     }
     if (!authorized(request, key)) {
       jsonResponse(response, 401, { error: { message: 'Missing or invalid API key', type: 'authentication_error', code: 'invalid_api_key' } })
+      return
+    }
+    // 并发闸门放在鉴权**之后**：未鉴权的请求不该占用并发名额（否则任何人都能
+    // 用无效 Key 把真人挤到 429）。放在路由**之前**：所有会向上游开流的端点
+    // 都走同一道门。
+    if (active.size >= maxInflight) {
+      logger.warn(`[openai-gateway] 并发已达上限 ${maxInflight}，拒绝新请求`)
+      jsonResponse(response, 429, {
+        error: {
+          message: `Too many concurrent requests (limit ${maxInflight}); retry shortly`,
+          type: 'rate_limit_error',
+          code: 'concurrency_limit_exceeded',
+        },
+      })
       return
     }
     const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname

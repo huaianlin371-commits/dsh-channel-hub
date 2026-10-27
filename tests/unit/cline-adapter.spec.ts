@@ -17,10 +17,12 @@ import {
 } from '../../src/cline-request-log.js'
 import { descriptorOf } from '../../src/provider-registry.js'
 import { createProviderCredits } from '../../src/provider-credits.js'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 import { accountEntry, refreshHarness } from '../helpers/rpc-refresh.js'
 import { jetHubAuthsCallKeys } from '../helpers/jet-hub-auths.js'
 import { PROVIDER_ICONS } from '../../plugin-src/client/provider-icons.js'
 import { CREDITS_CAPABILITIES } from '../../plugin-src/client/credits-capabilities.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -120,11 +122,6 @@ async function collect(
     out.push(chunk as unknown as Record<string, unknown>)
   }
   return out
-}
-
-/** 剥掉注释：接线断言不该因为「注释里提到了某个符号」而通过。 */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 }
 
 describe('ClineAdapter 模型目录', () => {
@@ -1022,7 +1019,10 @@ describe('Cline 接线（源码级回归）', () => {
   const read = (rel: string): string => readFileSync(resolve(root, rel), 'utf8')
 
   it('index.ts 注册 cline 服务、适配器与续期', () => {
-    const source = stripComments(read('src/index.ts'))
+    // ⚠️ 走**逻辑源码包**：⑨ 把 cline 的注册与适配器构造搬进了
+    //    `src/provider-wiring.ts`；直读裸 `index.ts` 会以「找不到 registerClineLlm」
+    //    假红（代码在、只是换了文件）。口径见 `tests/helpers/source-bundle.ts`。
+    const source = stripComments(readIndexSource())
     expect(source).toContain('registerClineLlm')
     expect(source).toContain('new ClineAuth(ctx)')
     // 只断言「cline 在续期调度里、且真的被传了池」—— 用 `(pool|p)` 同时接受
@@ -1063,7 +1063,7 @@ describe('Cline 接线（源码级回归）', () => {
   })
 
   it('jet-hub-rpc.ts 为 cline 接上登录、续期与余额三个分派点', async () => {
-    const source = read('src/jet-hub-rpc.ts')
+    const source = readRpcSource()
     expect(source).toContain('cline.startLogin({ refName })')
     // ⚠️ 2026-10-08 改（Task 2）：原先这条断言
     //    `/cline\.refreshAccountCredential\(entry\.credentialRef[^)]*\)/`

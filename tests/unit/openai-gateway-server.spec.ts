@@ -1,6 +1,6 @@
 import { request, createServer } from 'node:http'
 import { describe, expect, it } from 'vitest'
-import { BODY_LIMIT, createOpenAiGateway } from '../../src/openai-gateway/server.js'
+import { BODY_LIMIT, DEFAULT_MAX_INFLIGHT, createOpenAiGateway } from '../../src/openai-gateway/server.js'
 import { DEFAULT_IMAGE_LIMITS } from '../../src/openai-gateway/images.js'
 
 async function freePort(): Promise<number> {
@@ -791,5 +791,142 @@ describe('请求体上限与超限行为（Issue IKKUBJ）', () => {
     expect(BODY_LIMIT).toBeGreaterThanOrEqual(base64Bytes(DEFAULT_IMAGE_LIMITS.maxMessageImageBytes))
     // 单张声明也必须在门内：图片从来不独占请求体，还要与文本、tools 共处。
     expect(BODY_LIMIT).toBeGreaterThan(base64Bytes(DEFAULT_IMAGE_LIMITS.maxImageBytes))
+  })
+})
+
+/**
+ * 2026-10-27 架构审查 ④：网关的三个安全边界。
+ *
+ * 这三条都是**行为**断言（真发 HTTP 请求看响应），不是源码正则 —— 因为
+ * 「CORS 头有没有发」「429 会不会来」只有真跑一遍才算数。
+ */
+describe('OpenAI gateway 安全边界（架构审查 ④）', () => {
+
+  it('★ 响应不带 access-control-allow-origin（否则本机任意网页可带 Key 调网关）', async () => {
+    const port = await freePort()
+    const gateway = createOpenAiGateway({ llm, env: ENV(port) })
+    await gateway.start()
+    try {
+      const header = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const req = request({
+          host: '127.0.0.1', port, path: '/v1/models', method: 'GET',
+          headers: { authorization: 'Bearer test-key' },
+        }, (res) => {
+          res.resume()
+          res.on('end', () => resolve(res.headers as Record<string, unknown>))
+        })
+        req.on('error', reject)
+        req.end()
+      })
+      // 连 `*` 也不能有：浏览器只要看到这个头，就能读到本机的模型输出。
+      expect(header['access-control-allow-origin'], '网关不该给任何来源放行 CORS').toBeUndefined()
+    } finally {
+      await gateway.close()
+    }
+  })
+
+  it('★ 预检只回 204 与 allow 头，不回任何 access-control-*', async () => {
+    const port = await freePort()
+    const gateway = createOpenAiGateway({ llm, env: ENV(port) })
+    await gateway.start()
+    try {
+      const result = await new Promise<{ status: number; headers: Record<string, unknown> }>((resolve, reject) => {
+        const req = request({
+          host: '127.0.0.1', port, path: '/v1/chat/completions', method: 'OPTIONS',
+        }, (res) => {
+          res.resume()
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers as Record<string, unknown> }))
+        })
+        req.on('error', reject)
+        req.end()
+      })
+      expect(result.status).toBe(204)
+      // 预检本来就是浏览器才发的东西；回 204 是礼貌，回 access-control-* 是放行。
+      expect(result.headers['access-control-allow-origin']).toBeUndefined()
+      expect(result.headers['access-control-allow-headers']).toBeUndefined()
+      expect(result.headers['access-control-allow-methods']).toBeUndefined()
+    } finally {
+      await gateway.close()
+    }
+  })
+
+  it('★ 并发超过上限时回 429 concurrency_limit_exceeded（而不是无限接单）', async () => {
+    // 桩：每条流都挂住不结束，这样才能把并发数堆到上限。
+    const gatedLlm = {
+      ...llm,
+      stream: (options: { signal?: AbortSignal }) => hangingStream(options.signal),
+    }
+    const port = await freePort()
+    const gateway = createOpenAiGateway({ llm: gatedLlm, env: ENV(port), maxInflight: 1 })
+    await gateway.start()
+    // ⚠️ 必须留住这条挂起的连接并在 close 前 destroy：`server.close()` 会等
+    // 所有连接结束，而这条流的语义就是「永不结束」——不主动断开就会挂到超时。
+    let occupying: ReturnType<typeof request> | undefined
+    try {
+      // 第一条：占住唯一的并发名额（不 await 结束，它本来就结束不了）。
+      const first = new Promise<number>((resolve) => {
+        const req = request({
+          host: '127.0.0.1', port, path: '/v1/chat/completions', method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: 'Bearer test-key' },
+        }, (res) => {
+          res.once('data', () => resolve(res.statusCode ?? 0))
+          res.resume()
+        })
+        occupying = req
+        req.on('error', () => resolve(-1))
+        req.end(JSON.stringify({ model: 'qoder/qfmodel', messages: [{ role: 'user', content: 'hi' }], stream: true }))
+      })
+      expect(await first).toBe(200)
+
+      // 第二条：名额已满，必须被拒。
+      const second = await call(port, '/v1/chat/completions', {
+        method: 'POST', key: 'test-key',
+        body: { model: 'qoder/qfmodel', messages: [{ role: 'user', content: 'hi' }], stream: true },
+      })
+      expect(second.status).toBe(429)
+      expect(JSON.parse(second.body).error.code).toBe('concurrency_limit_exceeded')
+    } finally {
+      occupying?.destroy()
+      await gateway.close()
+    }
+  })
+
+  it('并发闸门在鉴权之后：无效 Key 不占名额，也拿不到 429 的信息', async () => {
+    const gatedLlm = {
+      ...llm,
+      stream: (options: { signal?: AbortSignal }) => hangingStream(options.signal),
+    }
+    const port = await freePort()
+    const gateway = createOpenAiGateway({ llm: gatedLlm, env: ENV(port), maxInflight: 1 })
+    await gateway.start()
+    let occupying: ReturnType<typeof request> | undefined
+    try {
+      // 先占满名额。
+      await new Promise<void>((resolve) => {
+        const req = request({
+          host: '127.0.0.1', port, path: '/v1/chat/completions', method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: 'Bearer test-key' },
+        }, (res) => { res.once('data', () => resolve()); res.resume() })
+        occupying = req
+        req.on('error', () => resolve())
+        req.end(JSON.stringify({ model: 'qoder/qfmodel', messages: [{ role: 'user', content: 'hi' }], stream: true }))
+      })
+
+      // 没带 Key：必须是 401，不是 429 —— 否则任何人都能用无效 Key 探到并发状态。
+      const noKey = await call(port, '/v1/chat/completions', {
+        method: 'POST', body: { model: 'qoder/qfmodel', messages: [{ role: 'user', content: 'hi' }] },
+      })
+      expect(noKey.status).toBe(401)
+      expect(JSON.parse(noKey.body).error.code).toBe('invalid_api_key')
+    } finally {
+      occupying?.destroy()
+      await gateway.close()
+    }
+  })
+
+  it('默认并发上限是 8（与五渠道的账号规模对齐）', () => {
+    // 数字本身是取舍：单渠道账号最多 4 个，8 条能把账号用满而不至于打空池子。
+    // 改成 1 会让多窗口用户频繁 429；改成 64 则等于没有闸门。
+    expect(DEFAULT_MAX_INFLIGHT).toBe(8)
   })
 })

@@ -49,21 +49,13 @@ import {
   splitBuddyCreditsByExpiry,
 } from '../../src/buddy-balance-rank.js'
 import { AUTOCLAW, AUTOCLAW_INTL } from '../../src/autoclaw-product.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const indexSource = readFileSync(resolve(here, '../../src/index.ts'), 'utf8').replace(/\r\n/g, '\n')
+const indexSource = readIndexSource().replace(/\r\n/g, '\n')
 
-/**
- * 剥掉注释后的源码。
- *
- * ⚠️ 接线断言不能因为「注释里提到了某个符号」就通过：本仓库注释大量解释
- * 「为什么不能走某条兜底」，对兜底的**否定**断言必须只看代码
- * （与 `minimax-lock-wiring.spec.ts` 的 `codeOnly` 同一约定）。
- */
-function codeOnly(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
-const indexCode = codeOnly(indexSource)
+const indexCode = stripComments(indexSource)
 
 /**
  * 取某个选号器的接线区间（`selector: <name>,` 起，到下一站的 selector /

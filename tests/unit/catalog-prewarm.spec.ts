@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 
 import {
   CATALOG_PREWARM_DELAYS_MS,
@@ -207,7 +208,7 @@ describe('IKJVTF 接线：十个适配器都接上了广播', () => {
   }
 
   it('jet-hub-rpc.ts 复用同一个实现（不再自带一份 emit）', () => {
-    const source = src('jet-hub-rpc.ts')
+    const source = readRpcSource()
     expect(source).toContain("from './catalog-broadcast.js'")
     // 旧的本地实现必须已被删除 —— 两份实现必然漂移。
     expect(source).not.toMatch(/function broadcastCatalogChanged\(ctx: Context\)/)
@@ -270,7 +271,11 @@ describe('IKJVTF 接线：十个适配器都接上了广播', () => {
   })
 
   it('index.ts 接线了冷启动预热，且停止函数挂 ctx.effect', () => {
-    const source = src('index.ts')
+    // ⚠️ 走**逻辑源码包**：`startCatalogPrewarm` 的接线留在入口文件，但
+    //    `providers: Object.keys(modelAdapters)` 依赖的 `modelAdapters` 表
+    //    建在 `src/provider-wiring.ts` 里 —— 下一条断言跨两个文件。
+    //    口径见 `tests/helpers/source-bundle.ts`。
+    const source = readIndexSource()
     expect(source).toContain("from './catalog-prewarm.js'")
     expect(source).toMatch(/ctx\.effect\(\(\)\s*=>\s*startCatalogPrewarm\(/)
     // 走 ctx.llm 公开路径（对 withDeadModelPruning 包装透明）。

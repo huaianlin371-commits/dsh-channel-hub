@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { stripComments } from '../helpers/strip-comments.js'
 
 /**
  * 「供应商 → 模型列表」统一管理屏的**源码级**回归。
@@ -19,11 +20,6 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(resolve(HERE, '../../plugin-src/client/jet-hub.js'), 'utf8')
 
-/** 剥掉注释再断言：注释里提到某个类名/端点不算接线。 */
-function codeOnly(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
-
 /**
  * 取 `function <name>(` 起、到**下一个顶层函数声明**止的源码。
  *
@@ -38,8 +34,8 @@ function bodyOf(name: string): string {
   return offset === -1 ? rest : rest.slice(0, offset + 1)
 }
 
-const panel = codeOnly(bodyOf('ModelCenterPanel'))
-const switchPanel = codeOnly(bodyOf('ProviderSwitchPanel'))
+const panel = stripComments(bodyOf('ModelCenterPanel'))
+const switchPanel = stripComments(bodyOf('ProviderSwitchPanel'))
 
 describe('入口接线：从「供应商」弹窗切到模型列表屏', () => {
   it('ProviderSwitchPanel 持有视图状态，且只在两屏之间切换', () => {

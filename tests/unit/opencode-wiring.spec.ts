@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const index = readFileSync(join(here, '../../src/index.ts'), 'utf8')
+const index = readIndexSource()
 
 describe('index.ts 接线', () => {
   it('注册 opencode 适配器', () => {

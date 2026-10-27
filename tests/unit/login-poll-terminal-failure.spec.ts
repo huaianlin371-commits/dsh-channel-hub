@@ -33,6 +33,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { AccountPool } from '../../src/account-pool.js'
 import { registerJetHubRpc, JET_HUB_API_PATH } from '../../src/jet-hub-rpc.js'
 import { markLoginNeedsExternalAction } from '../../src/login-failure.js'
+import { stripComments } from '../helpers/strip-comments.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 type Handler = (request: Request) => Promise<Response>
 
@@ -46,33 +48,6 @@ interface Harness {
   call(method: string, payload: unknown): Promise<RpcResult>
   /** 当前账号池里的条目（只读快照）。 */
   accounts(): Array<Record<string, unknown>>
-}
-
-/**
- * 去掉整行注释与块注释内容（**只为计数**）。
- *
- * ⚠️ 红队实测：块注释里插一行**裸文本** `failLogin(id, error)` 就能把计数守卫配平
- *（行锚定正则分不清「注释里的调用」与「真调用」）⇒ 计数前必须先剥注释。
- * 这里只剥「整行 `//`」与「`/* … *\/` 区间」，够用且不误伤 URL 里的 `//`。
- */
-function stripComments(source: string): string {
-  const out: string[] = []
-  let inBlock = false
-  for (const line of source.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (inBlock) {
-      if (trimmed.includes('*/')) inBlock = false
-      out.push('')
-      continue
-    }
-    if (trimmed.startsWith('/*')) {
-      if (!trimmed.includes('*/')) inBlock = true
-      out.push('')
-      continue
-    }
-    out.push(trimmed.startsWith('//') ? '' : line)
-  }
-  return out.join('\n')
 }
 
 /**
@@ -789,10 +764,7 @@ describe('IKLI7J 接线守卫：两侧必须同改，缺一处就退回静默转
     new URL('../../plugin-src/client/jet-hub.js', import.meta.url),
     'utf8',
   )
-  const serverSource = readFileSync(
-    new URL('../../src/jet-hub-rpc.ts', import.meta.url),
-    'utf8',
-  )
+  const serverSource = readRpcSource()
 
   /**
    * ⚠️ 源码断言一律用**行锚定正则**，不用 `indexOf('原始片段')`：

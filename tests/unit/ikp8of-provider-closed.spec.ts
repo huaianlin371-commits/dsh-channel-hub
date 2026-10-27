@@ -47,6 +47,7 @@ import { OPENCODE } from '../../src/opencode-product.js'
 import { OfficeAceAdapter } from '../../src/officeace-adapter.js'
 import { OFFICEACE, OFFICEACE_MODELS } from '../../src/officeace-product.js'
 import { AccountPool } from '../../src/account-pool.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const REPO = fileURLToPath(new URL('../..', import.meta.url))
 
@@ -104,7 +105,7 @@ function matchParenEnd(code: string, openIndex: number): number {
  * 源码判据恒绿（本仓库实测过的诱饵形态）。
  */
 function strippedIndexSource(): string {
-  return readFileSync(REPO + 'src/index.ts', 'utf8')
+  return readIndexSource()
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n')
     .filter((line) => !/^\s*\/\//.test(line))

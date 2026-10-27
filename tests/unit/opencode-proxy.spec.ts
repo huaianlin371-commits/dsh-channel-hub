@@ -4,29 +4,13 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildProxyDispatcher, buildSocks5Handshake, closeAllProxyDispatchers, proxyCacheSize, resolveConnectPort } from '../../src/opencode-proxy.js'
 import type { NormalizedProxy } from '../../src/opencode.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 const httpProxy: NormalizedProxy = { kind: 'http', url: 'http://127.0.0.1:7897', label: 'http://127.0.0.1:7897' }
 const socksProxy: NormalizedProxy = { kind: 'socks5', url: 'socks5://127.0.0.1:1080', label: 'socks5://127.0.0.1:1080' }
 
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(join(here, rel), 'utf8')
-
-/**
- * 剥掉注释后再做结构性断言。
- *
- * ⚠️ **必须有**：本文件的注释**故意**引用了那些「反面写法」
- * （例如「不许再写 `fetch(url, { dispatcher })`」「只取 error.message」），
- * 直接对原文做正则会被注释命中而**假失败** —— 写这组用例时实测到
- * （两条断言都因注释里的示例文本变红）。
- *
- * 只处理 `//` 行注释与 `/* *\/` 块注释；不追求完美的词法分析（够用即可，
- * 本仓库被检查的三个文件里没有「字符串里含 `//`」的病态写法）。
- */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
-}
 
 /**
  * 收集 `src/` 下全部 .ts 文件（相对仓库根）。

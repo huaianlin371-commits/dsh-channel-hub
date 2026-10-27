@@ -42,6 +42,7 @@ import { descriptorOf } from '../../src/provider-registry.js'
 import { buddyExpiringWindowDays } from '../../src/buddy-balance-rank.js'
 import { permanentLockCopy } from '../../plugin-src/client/credits-capabilities.js'
 import { isChannelAllowed } from './_channel-whitelist.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 // ⚠️ 必须 mock 掉余额入口：它内部会打云侧 V11 签名请求（真网络）。
 vi.mock('../../src/officeace-auth.js', async (importOriginal) => {
@@ -59,6 +60,24 @@ const mocked = vi.mocked(fetchSubscriptionSummary)
 const DAY = 24 * 60 * 60 * 1000
 
 /**
+ * 判断一个登记项的 `module` 是否属于 **`index` 逻辑源码包**。
+ *
+ * ⚠️ 架构审查 ⑨（2026-10-27）把 `src/index.ts` 的 provider 接线块（含
+ * astudio / autoclaw / qoder / minimax 的 `balance.lockedError`）搬进了
+ * `src/provider-wiring.ts`。两者在语义上是**同一个模块**，只是物理上分成了
+ * 两个文件（`tests/helpers/source-bundle.ts` 的 `BUNDLE_PARTS.index` 已登记）。
+ *
+ * 于是本表里 `module: 'src/index.ts'` 的登记项**读到的是逻辑源码包**而不是
+ * 裸文件 —— 否则「锁定执行路径在 index 里」这条判据会随拆分静默失效，
+ * 而失效方向是**变绿**（假通过），比变红危险得多。
+ */
+const INDEX_BUNDLE_MODULES = new Set(['src/index.ts'])
+
+function isIndexBundleModule(module: string): boolean {
+  return INDEX_BUNDLE_MODULES.has(module)
+}
+
+/**
  * 每家的执行路径登记表。
  *
  * ⚠️ `module` 是**实现这条锁定**的模块，`spec` 是**真的会驱动那条路径**的守卫文件
@@ -71,8 +90,7 @@ const DAY = 24 * 60 * 60 * 1000
  *    判别符号不可从渠道名推导出来，故「指向本文件」这条偷懒路径会被当场挡住。
  *    （⚠️ 它仍不是「路径被执行过」的证明 —— 那由 B 段用真实 `apply()` 承担。）
  */
-const LOCK_EXECUTION_PATHS: Record<
-  string,
+const LOCK_EXECUTION_PATHS: Record<  string,
   {
     module: string
     spec: string
@@ -85,8 +103,14 @@ const LOCK_EXECUTION_PATHS: Record<
      * 本字段存「调用形态」的片段（如 `lockedError: astudioLockedError('AStudio'),`），
      * 只有真的接在被测渠道上才会命中。
      *
-     * ⚠️ **`module === 'src/index.ts'` 的登记项必须填本字段**（本文件末尾有一条
+     * ⚠️ **`module` 属于 `index` 逻辑源码包的登记项必须填本字段**（本文件末尾有一条
      *    普查断言强制这件事），否则该渠道的「执行路径」判据退化成恒真。
+     *
+     * ⚠️ 架构审查 ⑨（2026-10-27）：`src/index.ts` 的 provider 接线块搬进了
+     *    `src/provider-wiring.ts`。两者同属**一个逻辑源码包**
+     *    （`tests/helpers/source-bundle.ts` 的 `BUNDLE_PARTS.index`），
+     *    故判据按「住在 index 包里」而不是「物理上在哪个文件」——
+     *    见 `isIndexBundleModule()`。
      */
     anchor?: string
   }
@@ -231,10 +255,20 @@ describe('★ 普查：凡登记 permanentLock 的渠道，都必须有一条执
       const spec = resolve(repoRoot, path.spec)
       expect(existsSync(module), `${provider} 的执行路径模块不存在：${path.module}`).toBe(true)
       expect(existsSync(spec), `${provider} 的守卫用例不存在：${path.spec}`).toBe(true)
+      /**
+       * ⚠️ index 逻辑源码包的登记项读**拼接后的源码包**，不读裸文件：
+       * ⑨ 把 astudio / autoclaw / qoder / minimax 的 `balance.lockedError`
+       * 搬进了 `src/provider-wiring.ts`，裸 `index.ts` 里已经找不到它们。
+       * 只读裸文件会让本条**变绿而不是变红**（找不到→`false`→其实会红，
+       * 但若哪天这些符号被注回出口文件就会静默恒真）——故统一走包口径。
+       */
+      const moduleSource = isIndexBundleModule(path.module)
+        ? readIndexSource()
+        : readFileSync(module, 'utf8')
 
       // ⚠️ 判别符号必须**真的由那个模块导出**（否则 `drives` 写错名也照样绿）。
       expect(
-        readFileSync(module, 'utf8').includes(path.drives),
+        moduleSource.includes(path.drives),
         `${path.drives} 不在 ${path.module} 里 —— 登记表的「判别符号」写错了`,
       ).toBe(true)
       /**
@@ -263,7 +297,7 @@ describe('★ 普查：凡登记 permanentLock 的渠道，都必须有一条执
        */
       if (path.anchor !== undefined) {
         expect(
-          readFileSync(module, 'utf8').includes(path.anchor),
+          moduleSource.includes(path.anchor),
           `${provider} 的接线锚点缺失：${path.module} 里找不到 \`${path.anchor}\`\n`
           + '  ⇒ 该渠道的 lockedError 或 balance 计划被删/被改成别的实现'
           + '（锁定仍会「显示已锁」，但没有任何执行路径可拦 —— 假开关）。\n'
@@ -288,7 +322,7 @@ describe('★ 普查：凡登记 permanentLock 的渠道，都必须有一条执
   })
 
   /**
-   * ★★ **`module === 'src/index.ts'` 的登记项必须填 `anchor`**
+   * ★★ **属于 `index` 逻辑源码包的登记项必须填 `anchor`**
    * （2026-10-21 合并审计补，防「判据悄悄退化成恒真」）。
    *
    * 五家（qoder / qodercn / astudio / minimax / minimaxintl）的执行路径都在
@@ -297,10 +331,14 @@ describe('★ 普查：凡登记 permanentLock 的渠道，都必须有一条执
    *
    * 修复不会靠「记得填」：本用例强制要求。将来再加一个 `index.ts` 类登记项却
    * 忘了 `anchor` ⇒ 当场红，而不是静默变回无牙。
+   *
+   * ⚠️ 架构审查 ⑨ 之后判据按**逻辑源码包**算（`src/index.ts` + 抽出的
+   * `src/provider-wiring.ts`）：拆出去的那半仍然属于「index 的接线」，
+   * 若只按物理文件名判，`anchor` 的强制就会在拆分后悄悄失效。
    */
   it('★★ `index.ts` 类登记项必须填 `anchor`（否则判据退化成「符号在文件里」）', () => {
     const missing = Object.entries(LOCK_EXECUTION_PATHS)
-      .filter(([, path]) => path.module === 'src/index.ts' && path.anchor === undefined)
+      .filter(([, path]) => isIndexBundleModule(path.module) && path.anchor === undefined)
       .map(([provider]) => provider)
     expect(
       missing,
@@ -308,7 +346,7 @@ describe('★ 普查：凡登记 permanentLock 的渠道，都必须有一条执
       + '删除接线后本普查仍会绿（裸符号的定义还在文件里）',
     ).toEqual([])
     // 自检：确实存在 index.ts 类登记项（否则本用例是同义反复）。
-    const indexEntries = Object.values(LOCK_EXECUTION_PATHS).filter((p) => p.module === 'src/index.ts')
+    const indexEntries = Object.values(LOCK_EXECUTION_PATHS).filter((p) => isIndexBundleModule(p.module))
     expect(indexEntries.length, '列表为空 ⇒ 上面那条恒真').toBeGreaterThan(0)
   })
 

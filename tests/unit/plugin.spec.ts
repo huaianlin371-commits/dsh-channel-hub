@@ -1,6 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { apply, makeReadImage } from '../../src/index.js'
 import * as pluginEntry from '../../src/index.js'
 import { runLoginFlow, runOAuthFlow } from '../../src/login.js'
@@ -45,6 +44,16 @@ class FakeCredentials {
   }
   async set(ref: string, value: string) { this.store.set(ref, value) }
   async unset(ref: string) { this.store.delete(ref) }
+}
+
+// ⚠️ **本 fork 不再依赖 `@deepseek-ai/dsh-commands`**（2026-10-27 架构审查 ③）：
+//    `src/` 里 `ctx.commands` 零命中，那个 peer 是死的。但测试仍需要一个
+//    「slash 命令表」来断言**没有**注册任何命令（这是真实回归价值：历史事故是
+//    插件往宿主命令表里塞东西）。故类型就地定义，不再 import 上游包。
+interface CommandDefinition {
+  name: string
+  description?: string
+  handler?: (...args: never[]) => unknown
 }
 
 class FakeCommands {
@@ -379,9 +388,13 @@ describe('WorkBuddy provider 注册', () => {
     expect(Array.isArray(inject)).toBe(true)
     expect(inject).not.toContain('connection')
     // 必需服务仍须声明，避免修 connection 时顺手把别的服务误删。
-    for (const required of ['credentials', 'commands', 'llm']) {
+    // ⚠️ **本 fork 移除了 `commands`**（2026-10-27 架构审查 ③）：`src/` 与
+    //    `plugin-src/client/` 里 `ctx.commands` 零命中，它是死 peer ——
+    //    声明一个从不使用的服务只会在精简 profile 里多一层 pending 风险。
+    for (const required of ['credentials', 'llm']) {
       expect(inject, required).toContain(required)
     }
+    expect(inject, 'commands 是死 peer，不得再声明').not.toContain('commands')
   })
 })
 

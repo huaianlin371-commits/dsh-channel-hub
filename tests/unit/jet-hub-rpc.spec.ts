@@ -37,6 +37,7 @@ import { catalogInvalidatedAt, clearCatalogInvalidations } from '../../src/model
 import { LoomyAdapter } from '../../src/loomy-adapter.js'
 import { LOOMY, type LoomyProduct } from '../../src/loomy-product.js'
 import { RACCOON } from '../../src/raccoon-product.js'
+import { readRpcSource } from '../helpers/source-bundle.js'
 
 /**
  * 注册**生产的那张** `probeById`（Task 8 起探测适配器由能力注册表提供）。
@@ -5884,12 +5885,26 @@ describe('★★ credits.balances 的 accountIds 裁剪', () => {
     expect(accountIdsOf(result), '★ 空数组 = 查空集').toEqual([])
   })
 
-  it('★ 畸形 accountIds（非数组 / 含非字符串）按「省略」处理，不抛错', async () => {
+  it('★ 畸形 accountIds（非数组 / 含非字符串）回 bad-request，不再静默当成「省略」', async () => {
+    // ⚠️ 口径变更（架构审查 ⑧，2026-10-27）：**旧行为是静默降级**。
+    //
+    // 旧判据是 `Array.isArray(req?.accountIds) ? new Set(...filter(...)) : undefined`
+    // —— 传字符串 `'a1'` 会被当成「没传」⇒ **查全部账号**；传 `[1, 'a1']` 会被
+    // 过滤成 `['a1']` ⇒ 静默丢项。两者都只表现为「面板慢了几秒 / 少了一个号」，
+    // 任何地方都不报错。
+    //
+    // 现在的判据：形状不对 ⇒ `bad-request` 并点出字段名。这不是能力退化，
+    // 是把静默的降级换成可读的拒绝 —— 调用方按 message 就能自查。
     const { call } = setup()
-    expect(accountIdsOf(await call('credits.balances', { provider: 'buddy', accountIds: 'a1' })))
-      .toEqual(['a1', 'a2', 'a3'])
-    expect(accountIdsOf(await call('credits.balances', { provider: 'buddy', accountIds: [1, 'a1'] })))
-      .toEqual(['a1'])
+    const notArray = await call('credits.balances', { provider: 'buddy', accountIds: 'a1' })
+    expect(notArray.ok).toBe(false)
+    expect((notArray.error as { code: string; field?: string }).code).toBe('bad-request')
+    expect((notArray.error as { field?: string }).field).toBe('accountIds')
+
+    const mixed = await call('credits.balances', { provider: 'buddy', accountIds: [1, 'a1'] })
+    expect(mixed.ok).toBe(false)
+    expect((mixed.error as { code: string; field?: string }).code).toBe('bad-request')
+    expect((mixed.error as { field?: string }).field).toBe('accountIds')
   })
 
   it('★★ 自愈**不受** accountIds 影响（铁律：续期不得按 enabled 过滤）', async () => {
@@ -5910,9 +5925,7 @@ describe('★★ credits.balances 的 accountIds 裁剪', () => {
     // ⚠️ 上面那条行为用例**分不出**「自愈收到全部账号」与「自愈收到裁剪后的账号」
     //    （单测无凭据 ⇒ 自愈内部对两者都不发请求）。⇒ 按本仓库惯例补一条
     //    **源码级判据**，并锚定具体片段（不是泛泛断言「文件里出现过 allAccounts」）。
-    const raw = await import('node:fs/promises').then((fs) => fs.readFile(
-      new URL('../../src/jet-hub-rpc.ts', import.meta.url), 'utf8',
-    ))
+    const raw = await import('node:fs/promises').then((fs) => Promise.resolve(readRpcSource()))
     const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
     // ★ 关键：余额端点那一处自愈必须是 `allAccounts`（不是被裁剪的 `accounts`）。
     expect(code, '★ 自愈必须用未裁剪的 allAccounts（停用账号也要续期）')

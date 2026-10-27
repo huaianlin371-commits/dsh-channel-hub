@@ -5,33 +5,8 @@ import { descriptorOf } from '../../src/provider-registry.js'
 import { createProviderCredits } from '../../src/provider-credits.js'
 import { jetHubAuthsCallKeys } from '../helpers/jet-hub-auths.js'
 import { accountEntry, refreshHarness } from '../helpers/rpc-refresh.js'
-
-/**
- * Task 6（接线）的回归防线。
- *
- * ⚠️ 本任务是**接线**：真正的行为验证靠 `pnpm typecheck`（接线漏一处即
- * 类型错或实参数量不符）与全量单测。完整 RPC 行为测试要构造 cordis Context
- * 与账号池替身，成本高且**既有九个 provider 也未对 RPC 层做单测** ——
- * 遵循既有惯例，不为本 provider 单独引入。
- *
- * 但接线类改动有一个**类型检查抓不到**的失效模式：接线点**漏接**或**串接**
- * （改错 provider 常量、忘了在某个分派表加一行）。故这里用源码断言锁住
- * 「每个分派点都真的有 minimax」—— 这类断言在既有仓库里已有先例
- *（见 `tests/unit/raccoon-client-independence.spec.ts` 等同型防线）。
- */
-/**
- * 剥掉注释：接线断言不该因为「注释里提到了某个符号」而通过。
- *
- * ⚠️ **必须剥**：本仓库的注释里经常**逐字写出反模式**（例如
- * 「不是 `available.id` / `available.credentialRef`」），若不剥离，
- * 针对反模式的 `not.toMatch` 会命中注释本身而**恒假失败**；
- * 反过来，注释里**逐字写出正模式**（例如 `wiredRefreshTargets()`）会让
- * `toMatch` 在真实调用被删掉后**仍然通过**。
- *（写这条用例时实测踩到前半段；Task 10 复审实测到后半段。）
- */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
+import { stripComments } from '../helpers/strip-comments.js'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 
 describe('RPC 分派常量', () => {
   it('⚠️ provider id 是 minimax（分派靠它匹配）', () => {
@@ -44,8 +19,8 @@ describe('RPC 分派常量', () => {
 })
 
 describe('接线点完整性（源码断言）', () => {
-  const indexSource = stripComments(readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8'))
-  const rpcSource = readFileSync(new URL('../../src/jet-hub-rpc.ts', import.meta.url), 'utf8')
+  const indexSource = stripComments(readIndexSource())
+  const rpcSource = readRpcSource()
 
   it('⚠️ index.ts 六处接线点齐全', () => {
     // 1. import MinimaxAuth

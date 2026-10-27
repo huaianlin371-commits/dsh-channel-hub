@@ -25,6 +25,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { stripComments } from '../helpers/strip-comments.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const HUB_SOURCE = readFileSync(resolve(here, '../../plugin-src/client/jet-hub.js'), 'utf8')
@@ -57,14 +58,6 @@ function loadFunction<T>(name: string): T {
   const body = extractFunction(HUB_SOURCE, name)
   // eslint-disable-next-line no-new-func -- 见文件头：只编译不执行，不碰 react。
   return new Function(`${body}\nreturn ${name}`)() as T
-}
-
-/** 去掉注释行，避免注释里的字面量被当成代码命中。 */
-function codeOnly(source: string): string {
-  return source
-    .split('\n')
-    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
-    .join('\n')
 }
 
 describe('summarizeTest 的行为', () => {
@@ -100,7 +93,7 @@ describe('summarizeTest 的行为', () => {
 })
 
 describe('「测试」按钮的接线', () => {
-  const code = codeOnly(HUB_SOURCE)
+  const code = stripComments(HUB_SOURCE)
 
   it('按钮的禁用条件只受 busy 约束，**不**依赖 hasAnyLimit', () => {
     // ⚠️ 核心回归点：照抄「重测」的 `busy || !hasAnyLimit` 会让没有限流标记的

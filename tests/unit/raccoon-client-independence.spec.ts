@@ -26,33 +26,13 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { stripComments } from '../helpers/strip-comments.js'
 
 /** 所有 raccoon 运行时源码文件。 */
 function raccoonSourceFiles(): Array<{ name: string; text: string }> {
   const dir = join(import.meta.dirname, '..', '..', 'src')
   const files = readdirSync(dir).filter((f) => f.startsWith('raccoon') && f.endsWith('.ts'))
   return files.map((name) => ({ name, text: readFileSync(join(dir, name), 'utf8') }))
-}
-
-/**
- * 逐行剥掉注释，只留可执行代码。
- *
- * 简化实现：去掉整行注释（`*` 开头、`//` 开头）与行尾 `//` 注释。
- * 对「注释里提到 office-raccoon、但代码里不引用」这一常见情形足够。
- * 块注释里以 `*` 开头的行都会被去掉，不会误报。
- */
-function stripComments(text: string): string {
-  return text
-    .split('\n')
-    .filter((line) => {
-      const t = line.trim()
-      return !t.startsWith('*') && !t.startsWith('/*') && !t.startsWith('//')
-    })
-    .map((line) => {
-      const idx = line.indexOf('//')
-      return idx >= 0 ? line.slice(0, idx) : line
-    })
-    .join('\n')
 }
 
 describe('raccoon 运行时零客户端依赖', () => {

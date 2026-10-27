@@ -26,14 +26,10 @@ import {
 } from '../../src/zcode-diagnostics.js'
 import { buildZcodeSystemBlocks, withContextPrefix } from '../../src/zcode-identity.js'
 import { describeUpstreamError, httpErrorCodeForZcode } from '../../src/zcode-adapter.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 /** 源码接线断言用（与 `zcode-captcha-upfront.spec.ts` 同一套定位法）。 */
 const HERE = dirname(fileURLToPath(import.meta.url))
-
-/** 剥注释后再断言：只改注释不该让接线「看起来」还在。 */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
 
 /** 走真实构造路径拿一份请求体形态（与 `stream()` 里用的是同一批函数）。 */
 function realShape(): ReturnType<typeof describeZcodeRequestShape> {

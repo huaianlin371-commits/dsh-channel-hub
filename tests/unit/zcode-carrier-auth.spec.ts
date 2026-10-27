@@ -58,11 +58,12 @@ import {
 import { ModelGate } from '../../src/model-gate.js'
 import { ZCODE } from '../../src/zcode-product.js'
 import type { ZcodeCredential } from '../../src/zcode.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const authSource = readFileSync(resolve(HERE, '../../src/zcode-auth.ts'), 'utf8')
 const adapterSource = readFileSync(resolve(HERE, '../../src/zcode-adapter.ts'), 'utf8')
-const indexSource = readFileSync(resolve(HERE, '../../src/index.ts'), 'utf8')
+const indexSource = readIndexSource()
 
 /** 需求记忆的基准时刻（注入给适配器的 `now`；**只**给记忆用，见 `ZcodeAdapterOptions.now`）。 */
 const T0 = 1_700_000_000_000

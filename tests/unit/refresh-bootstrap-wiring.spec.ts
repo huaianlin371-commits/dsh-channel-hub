@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { readIndexSource, readRpcSource } from '../helpers/source-bundle.js'
 import { REFRESH_PROVIDERS, accountEntry, refreshHarness } from '../helpers/rpc-refresh.js'
 import { isChannelAllowed } from './_channel-whitelist.js'
+import { stripComments } from '../helpers/strip-comments.js'
 
 /**
  * 多账号续期调度的**接线**回归（Gitee issue !IKIRTT）。
@@ -18,13 +20,8 @@ const here = fileURLToPath(new URL('.', import.meta.url))
 const root = resolve(here, '../..')
 const read = (rel: string): string => readFileSync(resolve(root, rel), 'utf8')
 
-/** 剥掉注释：接线断言不该因为「注释里提到了某个符号」而通过。 */
-function codeOnly(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
-
-const indexSource = codeOnly(read('src/index.ts'))
-const rpcSource = codeOnly(read('src/jet-hub-rpc.ts'))
+const indexSource = stripComments(readIndexSource())
+const rpcSource = stripComments(readRpcSource())
 
 /** 十个 auth 文件（`buddy-auth.ts` 一份实现同时服务 buddy 与 workbuddy）。 */
 const AUTH_FILES = [
@@ -216,7 +213,7 @@ describe('按需续期必须回写账号池的有效期', () => {
    * （凭据续好了，UI 读的池值纹丝不动）。
    */
   it.each(AUTH_FILES)('%s 的 refreshAccountCredential 接受 pool + accountId', (rel) => {
-    const signature = methodBody(codeOnly(read(rel)), 'async refreshAccountCredential')
+    const signature = methodBody(stripComments(read(rel)), 'async refreshAccountCredential')
     expect(signature, `${rel}: 签名缺 pool`).toContain('pool?: AccountPool')
     expect(signature, `${rel}: 签名缺 accountId`).toContain('accountId?: string')
     // Loomy 无续期端点，但仍要在探测成功后对账（见 LOOMY_EXPIRY_ACCESSORS）。
@@ -236,7 +233,7 @@ describe('按需续期必须回写账号池的有效期', () => {
     // 本缺陷的形态正是「raccoon 接好了、其余七个各漏一环」，
     // 故这里锁的是「每个文件都真的引了 `src/expiry-sync.ts`」。
     for (const rel of AUTH_FILES) {
-      const source = codeOnly(read(rel))
+      const source = stripComments(read(rel))
       expect(source, `${rel}: 未接入共享实现`).toContain("from './expiry-sync.js'")
       expect(source, `${rel}: 未调用共享实现`).toMatch(
         /syncAccountExpiry\(|refreshAccountWithReconcile\(|shouldRefreshNow\(/,
@@ -249,7 +246,7 @@ describe('按需续期必须回写账号池的有效期', () => {
     // 独有语义。raccoon 也不在内：它保留自己更严的「已过期才刷」判据
     // （见 `raccoon-auth.ts` 的注释），只共用回写。
     for (const rel of AUTH_FILES.filter((file) => !/loomy|raccoon/.test(file))) {
-      const source = codeOnly(read(rel))
+      const source = stripComments(read(rel))
       expect(
         source,
         `${rel}: refreshAll 未接入 refreshAccountWithReconcile`,
@@ -263,7 +260,7 @@ describe('按需续期必须回写账号池的有效期', () => {
    * 因此不走 lead-time 过滤，只借用共享的对账回写。
    */
   it('loomy 只做有效期对账，且绝不回写 refreshable', () => {
-    const source = codeOnly(read('src/loomy-auth.ts'))
+    const source = stripComments(read('src/loomy-auth.ts'))
     expect(source).toContain('LOOMY_EXPIRY_ACCESSORS')
     expect(source).toMatch(/syncAccountExpiry\(/)
     // 不提供 refreshableOf → 共享实现不会把池里的 `refreshable` 改掉。
@@ -350,7 +347,7 @@ describe('按需续期必须回写账号池的有效期', () => {
     // 这条路径由 `buddy-adapter.ts` 的 401/403 分支调用，触发频率远高于
     // RPC `account.refresh`；漏传 pool 就意味着 buddy/workbuddy 的
     // 「已过期」显示在实际续期成功后仍然挂着。
-    const source = codeOnly(read('src/buddy-auth.ts'))
+    const source = stripComments(read('src/buddy-auth.ts'))
     const body = source.slice(source.indexOf('export function createPoolRefresh'))
     expect(body).toMatch(
       /refreshAccountCredential\(\s*available\.entry\.credentialRef,\s*pool,\s*available\.entry\.id/,

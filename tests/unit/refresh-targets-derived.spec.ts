@@ -38,6 +38,7 @@ import {
   registerProviderRuntime,
   wiredRefreshTargets,
 } from '../../src/provider-runtime.js'
+import { readIndexSource } from '../helpers/source-bundle.js'
 
 afterEach(() => { clearProviderRuntimes() })
 
@@ -139,7 +140,7 @@ describe('modelAdapters 的键集合守卫（行为断言）', () => {
     // **键**在源码里是逐行字面量（每行 `key: pruned(...)`）⇒ 可以**剥注释后**
     // 精确提取，与 registry 的 channel 集合**双向**比对。
     // ⚠️ 必须剥注释：本文件上方那段很长的注释里**逐字出现** `aggregate:` 形态。
-    const source = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8')
+    const source = readIndexSource()
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '')
 
