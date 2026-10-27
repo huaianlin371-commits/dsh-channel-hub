@@ -67,6 +67,7 @@ import {
   PROVIDER_REGISTRY,
   creditCapabilitiesOf,
   descriptorOf,
+  isChannelAllowed,
 } from '../../src/provider-registry.js';
 
 /**
@@ -360,9 +361,22 @@ export function supportsDailyCheckin(provider) {
  *
  * 顺序即执行顺序（调用方串行执行），故它同时决定了请求的先后；
  * 保持本表声明顺序即可，不额外排序。
+ *
+ * ⚠⚠ **必须再过一遍白名单**（本 fork 的 `ALLOWED_CHANNELS`）：能力表是从
+ * `PROVIDER_REGISTRY` 的**全量目录**派生的（22 家），而白名单只裁剪「注册到
+ * `ctx.llm`」那条路径。真实缺陷（用户报障 2026-10-27）：「一键签到」的提示里
+ * 出现了 codearts / lobsterai / qoder / loomy / minimax / minimaxintl / zcode /
+ * astudio / autoclaw / autoclawintl / codely 一整串「无账号」——那些渠道早被
+ * 白名单关掉、面板上根本没有卡片，签到却照样逐个发请求（后端对无账号渠道是
+ * 零请求、返回空 summary，于是每条都渲染成「无账号」）。
+ *
+ * 判据用 `isChannelAllowed`（`channel: false` 的公共条目恒返回 true），
+ * **不要**改成 `ALLOWED_CHANNELS.has(id)` —— 后者会把无自有账号的条目也误杀。
  */
 export function checkinProviders() {
-  return Object.keys(CREDITS_CAPABILITIES).filter(supportsDailyCheckin);
+  return Object.keys(CREDITS_CAPABILITIES)
+    .filter(supportsDailyCheckin)
+    .filter((id) => isChannelAllowed(id));
 }
 
 /**
@@ -386,7 +400,9 @@ export function supportsOnboardingTasks(provider) {
  * 保留以便扩展）。**必须从能力表推导**，理由同 {@link checkinProviders}。
  */
 export function onboardingTaskProviders() {
-  return Object.keys(CREDITS_CAPABILITIES).filter(supportsOnboardingTasks);
+  return Object.keys(CREDITS_CAPABILITIES)
+    .filter(supportsOnboardingTasks)
+    .filter((id) => isChannelAllowed(id));
 }
 
 /**

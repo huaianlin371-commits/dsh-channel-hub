@@ -169,7 +169,14 @@ describe('积分能力矩阵', () => {
     // 「新渠道永远不被签到」，而不是报错 —— 故必须显式断言在里面。
     expect(checkinProviders()).toContain('qodercn')
     // 顺序紧跟国际版（本表声明顺序即请求顺序）。
-    expect(checkinProviders().indexOf('qodercn')).toBe(checkinProviders().indexOf('qoder') + 1)
+    //
+    // ⚠️ 顺序关系必须在**全量能力表**上验证，不能用 `checkinProviders()`：
+    //    后者已按 `ALLOWED_CHANNELS` 过滤（本 fork 的白名单关掉了 qoder 国际版），
+    //    此时 `checkinProviders().indexOf('qoder')` 恒为 -1，整个断言退化成
+    //    「qodercn 排第 0 位」，既测不到原有语义、还会在渠道顺序变动时假绿。
+    //    声明的相邻关系是能力表的固有属性，与白名单无关。
+    const fullCheckinOrder = Object.keys(CREDITS_CAPABILITIES).filter(supportsDailyCheckin)
+    expect(fullCheckinOrder.indexOf('qodercn')).toBe(fullCheckinOrder.indexOf('qoder') + 1)
   })
 
   it('Loomy 三项能力：余额 + 每日签到 + 新手任务', () => {
