@@ -28,12 +28,29 @@
 ⇒ **纪律**：
 1. **逐文件**改，一次一个；
 2. **每改一个跑一次全量 `vitest`**（10200+ 用例，约 70s）；
-3. 先跑分级脚本确认该文件属于「无 raw 断言」档（99 个）还是「需逐条核对」档（90 个）；
+3. 先跑分级工具确认档位（见下），再决定这个文件能不能放手改；
 4. **顺手做**：改到哪个文件就叙事化哪个文件 —— 不做集中运动，因为批量改会在
    无人察觉时把判据弄错位（错位的表现是**不报错、只是判据失效**）。
 
+### 分级工具：`npm run audit:narrative`
+
+```bash
+npm run audit:narrative                  # 全局：安全档 / 需核对档 + 优先顺序
+npm run audit:narrative -- src/foo.ts   # 单文件：列出它的全部 reader
+```
+
+单文件模式会标出每个 reader 是「**剥注释 ✓**」（删注释不影响断言）还是
+「**原文 ⚠️**」（有风险）；有原文 reader 时会进一步列出**只在注释里成立**的
+断言字面量与它所在的 spec —— 那几处就是这个文件的改稿边界。
+
+> 工具**只读**（不给 `--write`）：它产出判断依据，不是改写结果。因为「哪句是
+> 约束、哪句是过程」必须人来判断，机器猜不准。
+> 工具在 `scripts/docs-narrative-audit.mjs`，判据与 `tests/helpers/source-bundle.ts`
+> 同源（读同一个 `src/` 目录、同一套剥注释口径）。
+
 > 已按此口径改过：`src/autoclaw-product.ts`（429→404 行）、
-> `src/modelscope-product.ts`（421→404 行）。剩余 29 个文件仍 ≥8 处日期叙事
+> `src/modelscope-product.ts`（421→404 行）、`src/provider-wiring.ts`（28→22 处）。
+> 剩余 29 个文件仍 ≥8 处日期叙事
 > （`index.ts` 48 / `buddy-adapter.ts` 36 / `aggregate-expiry.ts` 35 /
 > `jet-hub-rpc.ts` 33 / `llm-adapter.ts` 26 …），多属「需逐条核对」档。
 
