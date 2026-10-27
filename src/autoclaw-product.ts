@@ -9,6 +9,16 @@
  * - 协议：OpenAI Chat Completions 兼容，SSE text/event-stream 响应
  * - 406 绕过硬性约束：首条 message 必须为 system 且包含前缀
  *   `You are AutoClaw. Answer the user directly and concisely`
+ *
+ * ## 规格、实测记录与历史事故去哪找
+ *
+ * 本文件只留**行为约束**（改错的后果）。「这个数值是怎么测出来的」「哪个缺陷
+ * 从哪次报障发现的」属于过程记录，放在：
+ *
+ * - `docs/autoclaw-models.md` —— 四个模型的窗口/输出/模态/扣费实测表（官方配置端点取证）
+ * - `docs/autoclaw-login-and-effort.md` —— 登录、图片能力、思考档位的真机探测记录
+ * - `docs/agent-notes/providers-autoclaw.md` —— 事故史：积分到期、JWT 死线、档位口径
+ * - `docs/audit/pr111-autoclaw-audit.md` —— 两轮独立审计与变异验证
  */
 
 export interface AutoclawFallbackModel {
@@ -17,43 +27,53 @@ export interface AutoclawFallbackModel {
   /** UI 显示名称。 */
   readonly name: string
   /**
-   * 真实上下文窗口大小（Token 数）。通过智谱官方模型配置端点实测探测为 1M (1,048,576)。
+   * 真实上下文窗口大小（Token 数）。兜底值 1M (1,048,576)，与官方配置端点实测一致。
    *
-   * ⚠️ **字段名已与桌面端源码核对**（2026-10-17，`AutoClaw2\...\dist\main.cjs`
-   * 的 `normalizeModel`）：远端模型配置报文的键就是 **`contextWindow`**（驼峰），
-   * 且上游用 `boundedPositiveInteger(value, 1e7)` 钳制、`>= 1e3` 才采纳。
+   * ⚠️ **远端报文的键是 `contextWindow`（驼峰）**，上游用
+   * `boundedPositiveInteger(value, 1e7)` 钳制、`>= 1e3` 才采纳。
+   * 解析处见 `parseAutoclawRemoteModels`。取证与键名核对过程见
+   * `docs/agent-notes/providers-autoclaw.md`。
    */
   readonly contextWindow: number
   /**
    * 最大输出 Token 数。
    *
-   * ⚠️ **字段名已与桌面端源码核对**（同上，`normalizeModel`）：远端报文的键
-   * 是 **`maxTokens`**（不是 `max_output_tokens`），上游钳制在 `1e6`，且有
-   * 一条额外约束：**`maxTokens` 必须 `< contextWindow`**，否则整条被丢弃。
+   * ⚠️ **远端报文的键是 `maxTokens`**（不是 `max_output_tokens`），上游钳制在
+   * `1e6`，且**`maxTokens` 必须 `< contextWindow`**，否则整条被丢弃。
    * ⇒ 本仓库 `parseAutoclawRemoteModels` 的候选别名里 `maxTokens` 在列。
    */
   readonly maxOutputTokens?: number
   /**
    * 是否支持图片输入。
    *
-   * ⚠️ **远端字段名已核对**（同上，`normalizeInput`）：远端用 **`input`**
-   * 数组，元素只接受 `"text"` / `"image"`；**缺该字段或非数组时回落
-   * `["text"]`** ⇒ 这与我们「未知按不支持处理」的口径一致。
+   * ⚠️ 远端用 **`input`** 数组，元素只接受 `"text"` / `"image"`；
+   * **缺该字段或非数组时回落 `["text"]`** ⇒ 与「未知按不支持处理」的口径一致。
+   *
+   * ⚠️⚠️ **该字段以本仓库实测为准，不要按远端声明回推**：远端对
+   * `zai_auto` 声明的是 `input: ["text"]`，实测却能正确读图（远端漏报形态，
+   * loomy 同款）。实测记录见 `docs/autoclaw-login-and-effort.md`「图片能力」。
    */
   readonly supportsImage?: boolean
-  /** 是否归类为免费额度模型。 */
+  /**
+   * 是否归类为免费额度模型。
+   *
+   * ⚠️⚠️ **判据是「是否脱离钱包扣费」，不是「远端目录里有没有它」**。
+   * 本家四个模型**全部走统一积分钱包**（每次请求约扣 1 点）⇒ 都是 `false`。
+   * 误标 `true` 会让付费模型进「免费额度」分栏并绕开锁定提示，原委见
+   * `docs/agent-notes/providers-autoclaw.md`。
+   */
   readonly isFree?: boolean
 }
 
 /**
- * 上游认可的思考档位词汇表（2026-10-17 **实测取证**，非推测）。
+ * 上游认可的思考档位词汇表（**实测取证**，非推测）。
  *
  * 来源：桌面端 `dist\main.cjs` 的 `MODEL_THINKING_LEVELS`，同一常量还被
  * SQLite 的 `CHECK(thinking_level IN (...))` 约束引用 ⇒ 两处独立印证。
  *
- * ⚠️ 本仓库只声明其中**三档**（`low` / `high` / `max`）——刻意**不**声明
- *   `off`：关思考在本仓库语义里由「不传 `reasoningEffort`」表达，而把
- *   `off` 混进档位数组会让客户端多出一格「关闭」，且与兄弟渠道
+ * ⚠️ 本仓库只声明其中**三档**（见 {@link AUTOCLAW_DECLARED_EFFORTS}），
+ *   刻意**不**声明 `off`：关思考在本仓库语义里由「不传 `reasoningEffort`」表达，
+ *   把 `off` 混进档位数组会让客户端多出一格「关闭」，且与兄弟渠道
  *   （buddy / raccoon / zcode）的档位轴不一致。
  *
  * ⚠️ 数组顺序 = **强度序（弱→强）**，不是「默认档排第一」——宿主把它当
@@ -66,132 +86,88 @@ export const AUTOCLAW_THINKING_LEVELS = Object.freeze([
 /**
  * 编译期兜底模型表。
  *
- * ## ⚠️⚠️ 本表与远端目录**不完全一致**，且这是**有意保留**的（2026-10-17 真机取证）
+ * ## ⚠️⚠️ 本表与远端目录**不完全一致**，且这是**有意保留**的
  *
- * 对 `autoclaw-model-config` 真实 GET（用插件自己的凭据）拿到的目录**只有 3 条**：
+ * 远端 `autoclaw-model-config` 只下发 3 条（`zai_auto` / `zai_auto-fast` /
+ * `zaicoding_glm-5.3`），**不含 `zai_glm-5.3-flash`**；三个共有模型的三项能力
+ * （`contextWindow` / `maxTokens` / `input`）与本表逐格一致。
  *
- * | id | 远端 | 本表 | 说明 |
- * |---|---|---|---|
- * | `zai_auto` | ✅ | ✅ | 数值逐格一致 |
- * | `zai_auto-fast` | ✅ | ✅ | 数值逐格一致 |
- * | `zaicoding_glm-5.3` | ✅ | ✅ | 数值逐格一致 |
- * | `zai_glm-5.3-flash` | ❌ **不在目录里** | ✅ 保留 | 见下 |
+ * **为什么仍保留 `zai_glm-5.3-flash`**：「目录里没有」≠「不可用」——真机实测
+ * 直接调它仍 200 且正常回复。合理解释是目录按账号/灰度裁剪，或它属「兼容保留」
+ * 通道。
  *
- * **三个共有模型的三项能力（`contextWindow` / `maxTokens` / `input`）
- * 与远端逐格一致** —— 这是本表数值可信的直接证据。
+ * ⚠️ 本表**必须如实登记**它不在目录里，否则后人看代码会以为目录里也有。
+ * ⚠️ 若将来它真下线（调用返回 `400 非法模型`），本表要一并删掉它。
  *
- * ### 为什么仍保留 `zai_glm-5.3-flash`
- *
- * 「目录里没有」≠「不可用」：真机实测**直接调它仍然 200 且正常回复**
- * （`reasoning_tokens=46`）。合理解释是目录按账号/灰度裁剪，或它属「兼容保留」
- * 通道。⇒ 保留它，因为：
- * - 它是 PR 里唯一标 `isFree: true` 的模型，**删掉会让免费额度分栏变空**；
- * - 删掉之后用户**无法**再选用一个实测可用的模型。
- *
- * ⚠️ 但**必须如实登记**它与目录不一致 —— 否则后人看代码会以为目录里也有它。
- * ⚠️ 若将来它真的下线（调用返回 `400 非法模型`），本表要一并删掉它。
- *
- * ### 名称策略：**保留远端 name，只加品牌后缀**（2026-10-17 用户核对后修正）
+ * ## 名称策略：**保留远端 name，只加品牌后缀**
  *
  * 远端 `name` 是 `Auto` / `Auto-Fast` / `GLM-5.3`（**不含品牌前缀**）。
  *
- * ⚠️⚠️ **本表曾把 `zaicoding_glm-5.3` 写成 `"GLM-5.3 Coding (AutoClaw)"`，
- * 那是误导**：用户对照 IDE 内置列表（`Auto` / `Auto-Fast` / `GLM-5.3` /
- * `GLM-5.3-Flash`）会以为「Coding」是**另一个模型**，而它**就是** IDE 里那个
- * `GLM-5.3` —— 远端 `name` 逐字为 `"GLM-5.3"`，消耗等级「高」也与 IDE 一致。
+ * ⚠️ id 里的 `coding` 只是通道标识，**不是给用户看的名字**：`zaicoding_glm-5.3`
+ *   的远端 `name` 逐字就是 `"GLM-5.3"` —— 它**就是** IDE 内置列表里那个
+ *   `GLM-5.3`（消耗等级「高」也一致）。写成「GLM-5.3 Coding」会让用户以为那是
+ *   另一个模型。
  *
- * ⇒ **id 里的 `coding` 只是通道标识，不是给用户看的名字**。
- *   凡是「id 与 name 语义不一致」时，**以远端 `name` 为准**：用户在 IDE 里
- *   看到什么，我们这里就该显示什么，否则两边对不上号（用户会问「哪个是哪个」）。
+ * ⇒ 凡「id 与 name 语义不一致」时**以远端 `name` 为准**：用户在 IDE 里看到什么，
+ *   这里就显示什么。
  *
  * ✅ 只做一件事：**加 `AutoClaw` 品牌标记**。理由是 DSH 的模型选择器**跨渠道
- * 平铺**，不加前缀会与别的渠道的 `Auto` / `GLM-5.3` 混淆（本仓库
- * `providers-buddy` 笔记记载过「同名模型必须把品牌写进 name」）。
- * ⇒ 用后缀 `(AutoClaw)` 保留**原名的可识别性**，而不是自己造一个名字。
+ *   平铺**，不加前缀会与别的渠道的 `Auto` / `GLM-5.3` 混淆（见
+ *   `docs/agent-notes/providers-buddy.md` 的「同名模型必须把品牌写进 name」）。
  */
 export const AUTOCLAW_FALLBACK_MODELS: readonly AutoclawFallbackModel[] = [
   {
     // ⚠️ 远端目录里**没有**这一条，但实测**直接调用仍可用**（见上方说明）。
-    //   它是唯一的 `isFree: true` 模型 ⇒ 删掉会让「免费额度」分栏变空。
     id: 'zai_glm-5.3-flash',
-    // ⚠️ 远端目录里没有这一条（故无权威 `name`），但 IDE 内置列表里显示为
-    //   `GLM-5.3-Flash` ⇒ 这里跟 IDE 对齐成 `GLM-5.3 Flash`（空格版，
-    //   与本表其余条目风格一致），仅加 `(AutoClaw)` 品牌后缀。
+    // 远端目录里没有这一条（故无权威 `name`），但 IDE 内置列表显示为
+    // `GLM-5.3-Flash` ⇒ 跟 IDE 对齐成 `GLM-5.3 Flash`（空格版，与本表其余条目
+    // 风格一致），仅加 `(AutoClaw)` 品牌后缀。
     name: 'GLM-5.3 Flash (AutoClaw)',
     contextWindow: 1048576,
     maxOutputTokens: 131072,
-    // ⚠️⚠️ **`true`，实测确认**（2026-10-17 用户反馈后重测，见
-    //   `docs/autoclaw-login-and-effort.md` 的「图片能力」一节）。
-    //   原值 `false` 是**错的**，错因值得记住：
-    //   我用「远端 `autoclaw-model-config` 目录里没有这个模型」推断它不支持，
-    //   那是**能力推断而非证据**。而第一版视觉探针又用了 64×64、笔画极细的
-    //   测试图（base64 仅 236 字符）⇒ 模型读不出 ⇒ 我误判成「不支持」。
-    //   ⇒ 换成 256×256、笔画粗、双判据（数字 7 + 红色横线）后，
-    //     **四个 `zai_*` 模型全部答对**。
+    // ⚠️⚠️ **`true`，实测确认**（四个 `zai_*` 模型全部答对双判据测试图）。
+    //   探针必须用**笔画够粗、尺寸够大**的图：早期用 64×64 细笔画图得到的是
+    //   假阴性（模型读不出 ⇒ 误判「不支持」）。取证见
+    //   `docs/autoclaw-login-and-effort.md`「图片能力」。
     supportsImage: true,
     /**
-     * ⚠️⚠️ **`false`，已按真机实测订正**（2026-10-21 二轮审计，P1）。
+     * ⚠️⚠️ **`false`**：本家**没有**真正的免费模型。
      *
-     * ## 原值 `true` 是错的
-     *
-     * `docs/autoclaw-models.md:25` 的真机实测写得很清楚：
-     * > **扣减机制**：依然走统一积分钱包扣减（实测每次请求扣减约 1 点积分），
-     * > **并非脱离钱包的免费模型**；钱包积分耗尽后同样会被限制。
-     *
-     * ## 原注释的错因（值得记住）
-     *
-     * 初版把 `isFree` 理解成「**远端目录里没有它、但直接调用能用**」= 免费。
-     * 那是把「**目录缺失**」当成了「**不扣费**」—— 两件不同的事。
-     *
-     * ## 用户可见后果
-     *
-     * `plugin-src/client/model-groups.js` 按 `isFree === true` 把模型归入
-     * **「免费额度」分栏**。而这个模型实测**每次都扣积分** ⇒
-     * - 用户以为它免费，实际在烧钱包；
-     * - 叠加「锁定永久积分」后更误导：锁定状态下它走 `autoclawLockedError`
-     *   报「请解锁永久积分」，用户解锁后**照样扣分** —— 两条口径互相矛盾。
-     *
-     * ## 为什么改是对的
-     *
-     * 原注释说「删掉会让『免费额度』分栏变空」—— 那个分栏**本来就不该有**
-     * 这一条（本家没有真正的免费模型）。**空分栏比「把付费模型标成免费」好得多**。
+     * 扣减机制是统一积分钱包（实测每次请求约扣 1 点），钱包耗尽后同样受限 ⇒
+     * 「脱离钱包」才是免费的判据。误标 `true` 会让它进「免费额度」分栏且绕开
+     * 锁定提示，用户以为免费、实际在烧钱包。原委见
+     * `docs/agent-notes/providers-autoclaw.md`。
      */
     isFree: false,
   },
   {
     id: 'zaicoding_glm-5.3',
-    // ⚠️⚠️ **远端 `name` 逐字就是 `"GLM-5.3"`**（2026-10-17 实测）。
-    //   ⇒ 它**就是** IDE 内置列表里那个 `GLM-5.3`（消耗等级「高」也对得上）。
-    //   ⚠️ 本表曾写作 `"GLM-5.3 Coding (AutoClaw)"` —— 那是**误导**：
-    //   用户会以为「Coding」是另一个模型。id 里的 `coding` 只是通道标识。
-    //   ⇒ 名字一律**以远端 `name` 为准**，只加 `(AutoClaw)` 品牌后缀。
+    // ⚠️⚠️ 远端 `name` 逐字就是 `"GLM-5.3"` ⇒ 它**就是** IDE 内置列表里那个
+    //   `GLM-5.3`（消耗等级「高」也对得上）。见上方「名称策略」。
     name: 'GLM-5.3 (AutoClaw)',
     contextWindow: 1048576,
     maxOutputTokens: 307200,
-    // ⚠️ **`true`，实测确认**（同上）。原值 `false` 同为误判。
     supportsImage: true,
     isFree: false,
   },
   {
     id: 'zai_auto',
-    // ⚠️ 远端 `name` 是 `"Auto"`（不含品牌）⇒ 加后缀以跨渠道区分。
+    // 远端 `name` 是 `"Auto"`（不含品牌）⇒ 加后缀以跨渠道区分。
     name: 'Auto (AutoClaw)',
     contextWindow: 1048576,
     maxOutputTokens: 393216,
-    // ⚠️ **`true`，实测确认**（同上）。原值 `false` 同为误判。
-    //   注：远端 `autoclaw-model-config` 对 `zai_auto` 声明的是
-    //   `input: ["text"]` —— 但**实测它能正确读图** ⇒ 远端声明**不完整**，
-    //   这正是本仓库记过的「远端漏报 input_modalities」形态（loomy 同款）。
+    // ⚠️ **`true`**：远端声明 `input: ["text"]`，但实测能正确读图 ⇒
+    //   远端声明**不完整**（Remote 漏报 input_modalities 形态，loomy 同款）。
     supportsImage: true,
     isFree: false,
   },
   {
     id: 'zai_auto-fast',
-    // ⚠️ 远端 `name` 是 `"Auto-Fast"`（连字符，与 id 的 `auto-fast` 同形）。
+    // 远端 `name` 是 `"Auto-Fast"`（连字符，与 id 的 `auto-fast` 同形）。
     name: 'Auto-Fast (AutoClaw)',
     contextWindow: 1048576,
     maxOutputTokens: 131072,
-    // ⚠️ 远端唯一**明确声明** `input: ["text","image"]` 的模型（与实测一致）。
+    // 远端唯一**明确声明** `input: ["text","image"]` 的模型（与实测一致）。
     supportsImage: true,
     isFree: false,
   },
@@ -200,32 +176,30 @@ export const AUTOCLAW_FALLBACK_MODELS: readonly AutoclawFallbackModel[] = [
 /**
  * 本仓库对外声明、并作为**默认档**使用的思考档位。
  *
- * ## 为什么只声明三档、且默认 `high`（用户 2026-10-17 决定）
+ * ## 为什么只声明三档、且默认 `high`
  *
  * 上游词汇表有 7 档（见 {@link AUTOCLAW_THINKING_LEVELS}），但实测取证表明
- * **推理量在档内波动跨 16 倍、区间完全重叠**（详见
- * `docs/audit/pr111-autoclaw-audit.md` 的踩坑记录）⇒ 我们**无法**用数据证明
- * 相邻档位（如 `low` vs `medium`）存在可感知差异。
+ * **推理量在档内波动跨 16 倍、区间完全重叠** ⇒ 无法用数据证明相邻档位
+ * （如 `low` vs `medium`）存在可感知差异。
  *
- * ⇒ 声明策略：**只给差异最可能显著的三个端点档**，不做更细的分档 ——
- *   展示一个「实际无差别」的档位等于给用户假选择。
+ * ⇒ 只给**差异最可能显著的三个端点档**：「实际无差别」的档位等于给用户假选择。
  *
  * ### 默认 `high` 而不是 `max`
  *
- * 用户 2026-10-17 明确取舍：**`max` 的适用面太窄**。
- * - `max` 是「极限推理」：实测在难题上单次可跑 **170~192 秒**
- *   （`max`/`low` 都有超 190s 的样本），日常对话的等待代价过高；
+ * - `max` 是「极限推理」：实测在难题上单次可跑 **170~192 秒**，日常对话等待
+ *   代价过高；
  * - `high` 是智谱官方标注的**推荐默认**
- *   （`docs/autoclaw-models.md:72`：「【官方推荐默认】完整展开推导演算」）；
- * - 远端目录的 `reasoningLevel` 顺序也是 `["low","high","max"]`，
- *   `high` 居中是「均衡」位。
+ *   （`docs/autoclaw-models.md`：「【官方推荐默认】完整展开推导演算」）；
+ * - 远端目录的 `reasoningLevel` 顺序也是 `["low","high","max"]`，`high` 居中是
+ *   均衡位。
  *
  * ⚠️ 所以 `high` 是**折中**而**非**「证明最强可用」——它是「够用且不会让用户
  *   等两分钟」的那一档。要极限推理时用户可手动选 `max`。
  *
  * ⚠️ 顺序是**强度序（弱→强）**，不是「默认档排第一」：宿主把它当展示顺序，
  *   官方客户端直接 `map` 不排序（AGENTS.md 明文记载）⇒ 若把 `high` 排到首位，
- *   横向档位轴会变成「左强右弱」。
+ *   横向档位轴会变成「左强右弱」。踩坑记录见
+ *   `docs/agent-notes/providers-autoclaw.md`。
  */
 export const AUTOCLAW_DECLARED_EFFORTS = Object.freeze(['low', 'high', 'max'] as const)
 

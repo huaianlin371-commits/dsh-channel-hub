@@ -1,34 +1,35 @@
 /**
  * ModelScope（魔搭，阿里达摩院）产品配置与错误分类。
  *
- * ## 这个 provider 从哪来（与上游其余 provider 的关系）
+ * ## 这个 provider 从哪来
  *
  * 本仓库是 gitee `iJetLi/deepseek-harness-codearts` 的 fork。上游 0.2.0-rc.3
- * **没有** modelscope / chatanywhere 两个 provider —— 它们是**本地 fork 独有的
- * 反代上游**（旧实现见 `dsh-codearts-auth@0.1.0` 的 `src/proxy/remote-upstream.ts`，
- * 由一个端口 8787 的 OpenAI 兼容反代按 priority 轮换）。2026-10-09 切到上游后
- * 这两个能力整体消失，本文件把 modelscope 一路按上游的**标准 provider 模式**
- * 补回来（而不是把旧 fork 的整套反代搬回来）。
+ * **没有** modelscope / chatanywhere 两个 provider —— 它们是**本地 fork 独有**的
+ * 反代上游。本文件把 modelscope 按上游的**标准 provider 模式**补回来
+ * （而不是把旧 fork 的整套反代搬回来）。
  *
  * ## 数据来源（逐条可追溯）
  *
- * | 事实 | 取值 | 出处 |
- * |---|---|---|
- * | base URL | `https://api-inference.modelscope.cn/v1` | 旧 fork `src/proxy/upstream-config.ts:51` |
- * | chat 路径 | `/chat/completions` | 旧 fork `src/proxy/remote-upstream.ts:429` |
- * | models 路径 | `/models` | 旧 fork `src/proxy/remote-upstream.ts:268` |
- * | 鉴权头 | `Authorization: Bearer <apiKey>` | 旧 fork `src/proxy/remote-upstream.ts:238` |
- * | 请求内容类型 | `Content-Type: application/json` | 同上 L236 |
- * | 流式 | `stream: true` 恒开，SSE | 旧 fork `src/proxy/remote-upstream.ts:376` |
- * | 模型名 | 带命名空间前缀，如 `deepseek-ai/DeepSeek-V4.1-Flash` | 旧 fork `src/domain/models/catalog.ts:277` |
- * | 关思考参数 | `reasoning_effort: "none"` / `enable_thinking: false` / `thinking: {type:"disabled"}` | 旧 fork `src/proxy/remote-upstream.ts:77` |
- * | 视觉能力 | `deepseek-v4.1-flash` 实测可收图 | 旧 fork `src/proxy/remote-upstream.ts:87-91` |
- * | 额度 | 平台**无余额 API**，余额只在登录后的网页上 | 旧 fork `src/overview.ts:70-76` |
+ * | 事实 | 取值 |
+ * |---|---|
+ * | base URL | `https://api-inference.modelscope.cn/v1` |
+ * | chat 路径 | `/chat/completions` |
+ * | models 路径 | `/models` |
+ * | 鉴权头 | `Authorization: Bearer <apiKey>` |
+ * | 请求内容类型 | `Content-Type: application/json` |
+ * | 流式 | `stream: true` 恒开，SSE |
+ * | 模型名 | 带命名空间前缀，如 `deepseek-ai/DeepSeek-V4.1-Flash` |
+ * | 关思考参数 | `reasoning_effort: "none"` / `enable_thinking: false` / `thinking: {type:"disabled"}` |
+ * | 视觉能力 | `deepseek-v4.1-flash` 实测可收图 |
+ * | 额度 | 平台**无余额 API**，余额只在登录后的网页上 |
+ *
+ * 逐行出处的取证索引（旧 fork 文件与行号）见
+ * `docs/agent-notes/providers-modelscope.md`。
  *
  * ## ⚠️ 一个已实测的 400（本 provider 最容易踩的坑）
  *
- * 旧 fork 曾把 DSH 的扁平工具 schema `{name, description, parameters}` **原样**
- * 转发给 modelscope，结果**每次请求都被 400 拒绝**：
+ * 把 DSH 的扁平工具 schema `{name, description, parameters}` **原样**转发给
+ * modelscope，**每次请求都会被 400 拒绝**：
  *
  * ```
  * upstream: modelscope  status: 400
@@ -37,9 +38,8 @@
  * ```
  *
  * 后果极隐蔽：反代把它当「上游不可用」静默跳过，魔搭积分**一次都没消耗**，
- * 用户完全看不出来（见旧 fork `src/proxy/remote-upstream.ts:386-395` 与
- * `src/proxy/openai-map.ts:242`）。
- * ⇒ 本实现必须走 `{type:'function', function:{…}}` 包装（见
+ * 用户完全看不出来。
+ * ⇒ 必须走 `{type:'function', function:{…}}` 包装（见
  * `src/modelscope-messages.ts`），与仓库其余 OpenAI 兼容 provider 同口径。
  *
  * @module src/modelscope-product.ts
@@ -72,25 +72,21 @@ export interface ModelscopeProduct {
   /** 模型目录请求超时（毫秒）。 */
   readonly catalogTimeoutMs: number
   /**
-   * **魔粒余额**端点的完整 URL（2026-10-17 带真实 Key 实测）。
+   * **魔粒余额**端点的完整 URL。
    *
    * ⚠️⚠️ **刻意是完整 URL 而非「拼在 baseUrl 之后」的 path**：它**不在**
    *    `baseUrl`（`api-inference.modelscope.cn/v1`）那个 host 上，而在
    *    `www.modelscope.cn` 的 **`/openapi/v1/`** 前缀下 ⇒ 用 path 拼装会得到
    *    一个 404 的错误地址。
    *
-   * 实测（三条认证形态各验一次，这是本仓库「目录能读 ≠ 凭据有效」纪律的同款要求）：
-   * | 认证 | 结果 |
-   * |---|---|
-   * | `Authorization: Bearer <ms-key>` | **200**，返回 `total_balance` |
-   * | 网页会话 cookie | 200，同一数值 |
-   * | 无凭据 | **401 `InvalidAuthentication`** |
-   * ⇒ 它**真的在校验凭据**（不是公开端点），且**API Key 就够**。
+   * ⚠️ 认证形态按「目录能读 ≠ 凭据有效」纪律验过三种：`Bearer <ms-key>` 与
+   *    网页 cookie 都 200、无凭据 401 `InvalidAuthentication` ⇒ 它**真的在校验
+   *    凭据**（不是公开端点），且 **API Key 就够**。
    *
-   * ⚠️ 找它的过程值得留档：本仓库与 PR 作者都曾判定「魔搭没有额度查询 API」，
-   *    那批探测只试过 `/api/` 与 `/v1/` 两个前缀，而真端点在 **`/openapi/`**；
-   *    它还**不在**前端主 bundle 的静态路径表里（藏在按需 chunk）⇒ 只能靠
-   *    抓真实网络请求（CDP）定位。详见 `docs/agent-notes/providers-modelscope.md`。
+   * ⚠️ 找它的过程：曾判定「魔搭没有额度查询 API」，那批探测只试过 `/api/` 与
+   *    `/v1/` 两个前缀，真端点在 **`/openapi/`**，且不在前端主 bundle 的静态
+   *    路径表里（藏在按需 chunk）。完整取证见
+   *    `docs/agent-notes/providers-modelscope.md`。
    */
   readonly balanceUrl: string
   /** 余额请求超时（毫秒）。 */
@@ -98,11 +94,10 @@ export interface ModelscopeProduct {
   /**
    * 单凭据回退 ref。
    *
-   * ⚠️ **不再是旧 fork 的 `PROXY_UPSTREAM_MODELSCOPE`**。那个前缀属于旧 fork 的
-   * 「反代上游」命名空间（`credentialRefForUpstream()` 的机械推导），在上游
-   * 0.2.0-rc.3 里**整套反代都不存在**（`git grep PROXY_UPSTREAM upstream/master`
-   * 零命中），保留它只会凭空造出一个『同时支持两种模式』的假象。
-   * 取 `MODELSCOPE_ACCESS_TOKEN` 的理由见 `tests/unit/modelscope-credential-ref.spec.ts`。
+   * ⚠️ **不是旧 fork 的 `PROXY_UPSTREAM_MODELSCOPE`**：那个前缀属于旧 fork 的反代
+   * 命名空间，在上游 0.2.0-rc.3 里**整套反代都不存在**，保留它只会凭空造出一个
+   * 「同时支持两种模式」的假象。取 `MODELSCOPE_ACCESS_TOKEN` 的理由见
+   * `tests/unit/modelscope-credential-ref.spec.ts`。
    */
   readonly defaultCredentialRef: string
 }
@@ -150,29 +145,27 @@ export interface ModelscopeFallbackModel {
 /**
  * 兜底模型表。
  *
- * ## 它解决什么（2026-10-17 实测后大幅扩表）
+ * ## 它解决什么
  *
- * 魔搭的 `/v1/models` **只下发 4 个字段**（实测：`id` / `object` / `owned_by` /
- * `created`）—— **既没有 `context_window`，也没有 `modalities.input`**：
+ * 魔搭的 `/v1/models` **只下发 4 个字段**（`id` / `object` / `owned_by` /
+ * `created`）—— **既没有 `context_window`，也没有 `modalities.input`**。
  *
- *     远端条目的全部字段: id, object, owned_by, created
- *     窗口相关字段: （无 —— 远端不下发任何窗口信息）
- *
- * ⇒ 原先只登记 2 个模型的后果是：**其余 34 个模型的 `contextWindow` 全落成 0**
+ * ⇒ 只登记少数几个模型的后果是：**其余模型的 `contextWindow` 全落成 0**
  * （0 是「不知道」哨兵，`resolveModel` 判 `> 0` 才下发 `context`）
- * ⇒ 用户看到 34 个模型「没有上下文窗口信息」，而 DSH 的自动压缩阈值算不出来。
- * ⇒ 故按 2026-10-17 用户指示扩表到**远端实测的 36 个**。
+ * ⇒ 用户看到模型「没有上下文窗口信息」，DSH 的自动压缩阈值也算不出来。
+ * ⇒ 故扩表到**远端实测到的全部模型**。
  *
  * ## ⚠️⚠️ 每个窗口值的**出处分两类**（不许混为一谈）
  *
  * | 类别 | 取值 | 依据 |
  * |---|---|---|
  * | **① 仓库已有实测** | `1_048_576` / `1_000_000` | 本仓库其它渠道对**同一模型**的实测结论（见各项注释里的出处） |
- * | **② 无先例** | `512_000` | **未实测**的保守占位（用户 2026-10-17 指示） |
+ * | **② 无先例** | `512_000` | **未实测**的保守占位 |
  *
- * ⚠️ **②类不是实测值**：魔搭上游不返回窗口字段，而逐个实测 17 个模型的真实
- * 上限成本过高（用户明示「没实测也不用测了」）⇒ 取一个**偏保守**的中间值，
- * 宁可低估窗口（提前触发压缩）也不要高估（DSH 以为能装 1M、实际被上游截断）。
+ * ⚠️ **②类不是实测值**：魔搭上游不返回窗口字段，而逐个实测每个模型的真实上限
+ * 成本过高 ⇒ 取一个**偏保守**的中间值，宁可低估窗口（提前触发压缩）也不要
+ * 高估（DSH 以为能装 1M、实际被上游截断）。取证过程见
+ * `docs/agent-notes/providers-modelscope.md`。
  *
  * ⚠️ **实测旁证（仅对 V4.1 Flash）**：喂约 **100 万 tokens** 输入返回 200
  * （`finish_reason: length` 只是**输出**被截断，不是输入超限）⇒ 原来的
@@ -191,19 +184,15 @@ export const MODELSCOPE_FALLBACK_MODELS: readonly ModelscopeFallbackModel[] = [
     id: 'deepseek-ai/DeepSeek-V4.1-Flash',
     name: 'DeepSeek-V4.1-Flash (魔搭)',
     contextWindow: 1_048_576,
-    // ⚠️ 视觉能力有实测出处（旧 fork remote-upstream.ts:87-91：
-    // 「modelscope / chatanywhere / deepseek 官方的 deepseek-v4.1-flash
-    //   都有视觉能力（1×1 纯色 PNG 红/蓝/绿全答对）」；2026-10-17 本仓库
-    //   复测 32×32 纯红 PNG → 模型答 `Red`，读图确实生效）。
+    // ⚠️ 视觉能力有实测出处（旧 fork 的 remote-upstream 记录 + 本仓库复测
+    //   32×32 纯红 PNG → 模型答 `Red`）。
     supportsImage: true,
-    // ⚠️⚠️ **只有「关闭思考」是确证的一档**（2026-10-17 真机三档对照，每档 3 次）：
-    //    `none` → reasoning 0/0/0（**稳定为 0**，「关闭」确实生效）；
-    //    而 `medium`（中位数 1462）与 `high`（1734）**低于「不指定」的 1676**，
-    //    差距远小于同档内波动（同档极差 460+）
+    // ⚠️⚠️ **只有「关闭思考」是确证的一档**（真机三档对照、每档 3 次）：
+    //    `none` → reasoning 稳定为 0（「关闭」确实生效）；
+    //    而 `medium` / `high` 的中位数**低于**「不指定」，差距远小于同档内波动
     //    ⇒ **`medium`/`high` 被服务端静默忽略**（请求返 200，但不改变思考量）。
-    //    ⚠️ 这正是仓库记过的判据（「能正常请求」≠「档位生效」，必须用服务端
-    //    权威计数证明档位间有**可区分**的差距，见 providers-accio.md §7）。
-    //    ⇒ 只声明确证的一档；给出手感档位会让用户以为能控思考量。
+    //    ⚠️ 这正是仓库的既有判据（「能正常请求」≠「档位生效」）⇒ 只声明确证的
+    //    一档；给出手感档位会让用户以为能控思考量。
     efforts: ['none'],
   },
   {
@@ -292,8 +281,8 @@ export type ModelscopeErrorKind =
   | 'server'
   | 'transport'
   | 'invalid_request'
-  // ⚠️ **本 fork 独有**（2026-10-17 审计 P1 修复）：上下文窗口超限。
-  //    此前缺这一类 ⇒ 超限报文被 `exceed` 关键词判成 quota ⇒ 账号被封到次日零点。
+  // ⚠️ **本 fork 独有**：上下文窗口超限。
+  //    缺这一类时超限报文会被 `exceed` 关键词判成 quota ⇒ 账号被封到次日零点。
   //    语义上它既不是配额、也不是限流：**不该写任何冷却标记**。
   | 'context_window'
 
